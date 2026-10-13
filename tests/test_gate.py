@@ -477,17 +477,87 @@ class VerifiedAbsenceTests(unittest.TestCase):
             )
         self.assertEqual("absence_pattern_present", caught.exception.reason)
 
+    def test_the_fraction_ceiling_alone_fails_at_realistic_scale(self):
+        # The regression this exists to prevent.  The fraction was fitted to
+        # an 88-byte file; against a 9,000-character module it permits a
+        # 4,500-character "absence pattern", so the bound that caught the
+        # vacuous claim on the toy catches nothing on real code.  An invented
+        # statement is absent by construction at every size, so the absolute
+        # cap is the one that does the work here.
+        big = EvidenceSource(
+            name="big.py",
+            kind="source",
+            text="def handler(request):\n    return None\n" + ("# filler\n" * 1000),
+        )
+        invented = "if amount > account.balance:\n        raise ValueError('no')\n"
+        self.assertGreater(len(big.text), 9000)
+
+        findings = [
+            finding(
+                requirement=self.MISSING,
+                evidence=self.PREFIX + invented,
+                detail="Nothing records the withdrawal.",
+            )
+        ]
+        arguments = {
+            "requirements": [self.MISSING],
+            "sources": [big],
+            "absence_prefix": self.PREFIX,
+        }
+
+        # With the fraction alone -- the bounds as they were fitted to the toy.
+        admitted = check(
+            findings, max_absence_pattern_chars=None, **arguments
+        )
+        self.assertIs(True, admitted["findings"][0]["verified_absence"])
+        self.assertLess(admitted["findings"][0]["absent_pattern_fraction"], 0.01)
+
+        # With both bounds, which is the default.
+        with self.assertRaises(GateError) as caught:
+            check(findings, **arguments)
+        self.assertEqual("absence_pattern_too_broad", caught.exception.reason)
+        # And the diagnostic says which bound bit, because only one did.
+        self.assertEqual(["pattern_chars"], caught.exception.diagnostic["exceeded"])
+
+    def test_the_two_ceilings_cross_at_eighty_characters(self):
+        # Worked out rather than assumed, because it decides whether the
+        # fraction is doing anything.  The fraction permits half the source
+        # and the cap permits 40, so the fraction binds only below 80
+        # characters -- which is no real file, and exactly the degenerate case
+        # this library exists for.  Below the crossover it is the only bound
+        # between a 30-character pattern and a 48-character file.
+        tiny = EvidenceSource(name="t.py", kind="source", text="def f():\n    return account.balance\n")
+        self.assertLess(len(tiny.text), 80)
+        pattern = "x" * 30
+        self.assertLess(len(pattern), 40)  # under the absolute cap
+
+        with self.assertRaises(GateError) as caught:
+            check(
+                [finding(requirement=self.MISSING, evidence=self.PREFIX + pattern,
+                         detail="Nothing records it.")],
+                requirements=[self.MISSING],
+                sources=[tiny],
+                absence_prefix=self.PREFIX,
+            )
+        self.assertEqual("absence_pattern_too_broad", caught.exception.reason)
+        self.assertEqual(["source_fraction"], caught.exception.diagnostic["exceeded"])
+
     def test_the_ceiling_can_be_disabled_but_not_set_absurdly(self):
         long_pattern = "if amount > account.balance:\n        raise ValueError('no')\n"
         receipt = self._check(
             long_pattern,
             allowed_kinds=frozenset({"source"}),
             max_absence_source_fraction=None,
+            max_absence_pattern_chars=None,
         )
         self.assertIs(True, receipt["findings"][0]["verified_absence"])
         self.assertIsNone(receipt["max_absence_source_fraction"])
+        self.assertIsNone(receipt["max_absence_pattern_chars"])
         with self.assertRaises(ValueError):
             self._check("record(", max_absence_source_fraction=0)
+        with self.assertRaises(ValueError):
+            # A cap below the floor would refuse every possible pattern.
+            self._check("record(", max_absence_pattern_chars=2)
 
     def test_empty_prefix_is_rejected(self):
         with self.assertRaises(ValueError):

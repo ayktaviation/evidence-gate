@@ -1,0 +1,85 @@
+name: checks
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  # The suite is the point of the project, so it runs on every version the
+  # package claims to support rather than one convenient version.
+  tests:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.10", "3.11", "3.12", "3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      # Deliberately no install step: if this passes, the "no dependencies, no
+      # install" claim in the README is true on this version, not asserted.
+      - run: python -m unittest discover -s tests -v
+
+  claims:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      # A README that drifts from the code is the failure mode this whole
+      # project is about, so the README's own numbers are checked.
+      - run: python tools/check_claims.py
+
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install --upgrade pip build
+      - run: python -m build
+      # Installed from the built wheel, not the source tree, so a missing
+      # py.typed or an unpackaged module fails here instead of for a user.
+      - run: python -m pip install dist/*.whl
+      - run: |
+          cd /tmp
+          python - <<'PY'
+          import importlib.metadata as md
+          import pathlib
+
+          import evidence_gate
+          from evidence_gate import EvidenceSource, GateError, check
+          from evidence_gate import ollama  # noqa: F401
+
+          shipped = {f.name for f in pathlib.Path(evidence_gate.__file__).parent.iterdir()}
+          assert "py.typed" in shipped, f"py.typed not packaged: {sorted(shipped)}"
+
+          requires = md.metadata("evidence-gate").get_all("Requires-Dist") or []
+          assert not requires, f"declared a dependency: {requires}"
+
+          assert evidence_gate.__version__ == md.version("evidence-gate")
+
+          source = EvidenceSource(name="a.py", kind="source", text="def f():\n    return 1\n")
+          receipt = check(
+              [{"requirement": "f must return 2", "evidence": "return 1", "detail": "returns 1"}],
+              requirements="f must return 2",
+              sources=[source],
+          )
+          assert receipt["quoted_finding_count"] == 1
+
+          try:
+              check(
+                  [{"requirement": "f must return 2", "evidence": "return 99", "detail": "x"}],
+                  requirements="f must return 2",
+                  sources=[source],
+              )
+          except GateError as refusal:
+              assert refusal.reason == "evidence_not_in_context"
+          else:
+              raise AssertionError("a fabricated quote was admitted")
+          print("wheel behaves")
+          PY

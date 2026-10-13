@@ -61,6 +61,26 @@ DEFAULT_MAX_SOURCE_FRACTION = 0.5
 #: patterns of 70, 57 and 35 characters against that very file.
 DEFAULT_MAX_ABSENCE_SOURCE_FRACTION = 0.5
 
+#: The fraction above was fitted to an 88-byte file, and a fraction dissolves
+#: as the subject grows: against two real modules of ~9,000 characters each it
+#: permits an absence pattern of 4,500 characters.  A 70-character invented
+#: statement is absent by construction from a file of any size, so the ceiling
+#: that actually does the work at realistic scale is an absolute one.  Both
+#: apply; the binding one is whichever is smaller.
+#:
+#: Forty characters is roughly where "a name or a call" ends and "a statement
+#: I wrote myself" begins: ``record(``, ``raise ValueError`` and
+#: ``audit.log_withdrawal(account, amount)`` all fit, while a two-line invented
+#: block does not.
+#:
+#: Note where the two bounds cross.  The fraction permits ``0.5 * len(source)``
+#: and the cap permits 40, so the fraction is the binding one only for sources
+#: shorter than 80 characters.  Above that -- which is all real code -- the cap
+#: does the work alone.  The fraction is kept because it is the only thing
+#: standing between a 39-character pattern and a 40-character file, and that
+#: degenerate case is exactly the kind this library exists to refuse.
+DEFAULT_MAX_ABSENCE_PATTERN_CHARS = 40
+
 REQUIRED_KEYS = frozenset({"requirement", "evidence", "detail"})
 
 
@@ -172,6 +192,7 @@ def check(
     absence_prefix: str | None = None,
     min_absence_pattern_chars: int = 3,
     max_absence_source_fraction: float | None = DEFAULT_MAX_ABSENCE_SOURCE_FRACTION,
+    max_absence_pattern_chars: int | None = DEFAULT_MAX_ABSENCE_PATTERN_CHARS,
     require_whole_clause: bool = False,
 ) -> dict[str, object]:
     """Admit or refuse a batch of findings.  Fail-closed on the first refusal.
@@ -201,6 +222,13 @@ def check(
         raise ValueError("min_absence_pattern_chars must be at least 1")
     if max_absence_source_fraction is not None and not 0 < max_absence_source_fraction <= 1:
         raise ValueError("max_absence_source_fraction must be in (0, 1]")
+    if (
+        max_absence_pattern_chars is not None
+        and max_absence_pattern_chars < min_absence_pattern_chars
+    ):
+        raise ValueError(
+            "max_absence_pattern_chars must not be below min_absence_pattern_chars"
+        )
 
     scoped = [
         source
@@ -282,37 +310,55 @@ def check(
                     sources=sorted({item["source"] for item in found}),
                     **_field("evidence", evidence),
                 )
-            # The ceiling is measured against the *smallest* source searched,
-            # because the claim is "absent from everything you showed me", and
-            # that claim is only as strong as its weakest search.
-            if max_absence_source_fraction is not None and scoped:
-                smallest = min(max(len(source.text), 1) for source in scoped)
-                breadth = round(len(pattern) / smallest, 4)
-                if breadth > max_absence_source_fraction:
-                    raise GateError(
-                        "absence_pattern_too_broad",
-                        index=index,
-                        pattern_chars=len(pattern),
-                        smallest_source_chars=smallest,
-                        source_fraction=breadth,
-                        max_absence_source_fraction=max_absence_source_fraction,
-                        **_field("evidence", evidence),
-                    )
+            # Two ceilings, because one of them stops working at scale.  The
+            # fraction is measured against the *smallest* source searched --
+            # the claim is "absent from everything you showed me", and it is
+            # only as strong as its weakest search -- and it is what catches a
+            # pattern the size of a small file.  The absolute cap is what still
+            # works when the file is 9,000 characters and every fraction is
+            # negligible.  Whichever binds first, binds.
+            smallest = (
+                min(max(len(source.text), 1) for source in scoped) if scoped else None
+            )
+            breadth = round(len(pattern) / smallest, 4) if smallest else None
+            over_fraction = (
+                max_absence_source_fraction is not None
+                and breadth is not None
+                and breadth > max_absence_source_fraction
+            )
+            over_absolute = (
+                max_absence_pattern_chars is not None
+                and len(pattern) > max_absence_pattern_chars
+            )
+            if over_fraction or over_absolute:
+                raise GateError(
+                    "absence_pattern_too_broad",
+                    index=index,
+                    pattern_chars=len(pattern),
+                    smallest_source_chars=smallest,
+                    source_fraction=breadth,
+                    max_absence_source_fraction=max_absence_source_fraction,
+                    max_absence_pattern_chars=max_absence_pattern_chars,
+                    # Which bound bit matters to the caller: the fraction says
+                    # "too big for this file", the absolute says "you wrote a
+                    # statement instead of naming a thing".
+                    exceeded=sorted(
+                        bound
+                        for bound, hit in (
+                            ("source_fraction", over_fraction),
+                            ("pattern_chars", over_absolute),
+                        )
+                        if hit
+                    ),
+                    **_field("evidence", evidence),
+                )
             rows.append(
                 {
                     "index": index,
                     "quoted": False,
                     "verified_absence": True,
                     "absent_pattern_chars": len(pattern),
-                    "absent_pattern_fraction": (
-                        round(
-                            len(pattern)
-                            / min(max(len(source.text), 1) for source in scoped),
-                            4,
-                        )
-                        if scoped
-                        else None
-                    ),
+                    "absent_pattern_fraction": breadth,
                     "searched_sources": [source.name for source in scoped],
                     **_field("requirement", requirement),
                     **_field("evidence", evidence),
@@ -449,6 +495,7 @@ def check(
         "max_source_fraction": max_source_fraction,
         "min_absence_pattern_chars": min_absence_pattern_chars,
         "max_absence_source_fraction": max_absence_source_fraction,
+        "max_absence_pattern_chars": max_absence_pattern_chars,
         "allowed_kinds": sorted(allowed_kinds) if allowed_kinds is not None else None,
         # Canonical digest over the clause list, so a reader can tell whether
         # two receipts were produced against the same requirements.

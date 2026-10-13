@@ -19,8 +19,10 @@ classifiers = [
 ]
 dependencies = []
 
-[project.urls]
-Source = "https://github.com/OWNER/evidence-gate"
+# No [project.urls] yet.  A placeholder URL in published metadata is a dead
+# link that outlives the mistake, and this project's whole argument is that an
+# unchecked claim is worse than an absent one.  Added when a canonical home
+# exists.
 
 [tool.setuptools.packages.find]
 where = ["src"]

@@ -128,14 +128,67 @@ the trace, and nothing was left for the answer. A measurement harness that
 cannot tell an empty answer from a dishonest one will produce confident
 nonsense.
 
+## What happened at realistic scale
+
+Everything above is nine data points against an 88-byte file. Thresholds fitted
+to a toy are suspect, so I ran the same procedure against two real modules —
+`gate.py` and `ollama.py`, 26,538 characters, four requirements about this
+code's own stated rules (`examples/at_scale.py`).
+
+**No model produced an admissible review. Not one of the three, and none of the
+failures was about evidence.**
+
+| model | output | outcome |
+|---|---|---|
+| devstral:24b | 3,647 bytes | prose essay, no `findings` key — format failure |
+| qwen2.5-coder:14b | 2,950 bytes | prose, no `findings` key — format failure |
+| qwen3:8b | 1,750 bytes | JSON, refused `finding_key_set_mismatch` |
+
+This reframes the whole table above. On a toy, the binding constraint was
+whether a quote could be verified. At 26 KB the binding constraint is whether
+the model answers in the requested shape at all — the gate never gets far
+enough to check a quote. Measuring evidence fidelity on an 88-byte file told me
+about gates. It told me nothing about whether any of this survives contact with
+a real module, and the answer so far is that it does not.
+
+The gate does at least separate the two. A format failure is reported as a
+format failure and never as fabrication, which is the distinction that made the
+qwen3 empty-answer trap visible earlier.
+
+**One of those three failures has a confound I should name.** qwen3's rejected
+keys were `index`, `match_count` and `matches` — fields of the receipt schema
+defined in the very file it was reviewing. It imitated the data structure it was
+reading instead of answering about it. Reviewing the gate with the gate is
+convenient and reproducible, and it contaminates the output format. That result
+is evidence of self-review contamination at least as much as evidence about
+scale, and a clean version of this experiment needs a subject the reviewer has
+no reason to mimic.
+
+### The threshold that dissolved
+
+The scale run also killed a bound I had just written. `max_absence_source_fraction`
+permits half the smallest source: 44 characters against the toy, but **2,504
+characters** against these modules. The bound that caught the vacuous absence
+claim on an 88-byte file catches nothing whatsoever on real code, because an
+invented statement is absent by construction at any size and a fraction of a
+large file is enormous.
+
+So absence now carries an absolute cap as well, and the binding bound is
+whichever is smaller. They cross at 80 characters: above that — all real code —
+the absolute cap works alone, and the fraction survives only to stand between a
+39-character pattern and a 40-character file. Written out because a bound whose
+scope you cannot state is a bound you are trusting, not using.
+
 ## Try it in 60 seconds
 
 ```bash
-git clone https://github.com/OWNER/evidence-gate && cd evidence-gate
-python -m unittest discover -s tests          # 39 tests, no dependencies, no install
+cd evidence-gate
+python -m unittest discover -s tests          # 41 tests, no dependencies, no install
+python tools/check_claims.py                  # the README's own numbers, verified
 
 # with a local Ollama running:
-python examples/reproduce.py --model qwen3:8b
+python examples/reproduce.py --model qwen3:8b   # the 88-byte measurement
+python examples/at_scale.py  --model qwen3:8b   # the 26 KB one, which fails
 ```
 
 The example prints the model's receipt (model digest, and separate hashes for
@@ -159,7 +212,7 @@ indentation and a different Unicode normal form; all four are refused.
 The gate stops at the first inadmissible finding rather than collecting every
 problem, because one inadmissible quote already makes the answer inadmissible.
 
-Every refusal is one of eleven declared reasons, and raising an undeclared one
+Every refusal is one of twelve declared reasons, and raising an undeclared one
 is a programming error. A test asserts the suite contains a control for every
 one, so adding a way to refuse without a control for it fails the build:
 
