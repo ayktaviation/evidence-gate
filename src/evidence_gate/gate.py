@@ -35,6 +35,9 @@ REASONS = frozenset(
         "requirement_not_exact_quote",
         "evidence_too_short",
         "evidence_too_long",
+        "absence_pattern_too_short",
+        "absence_pattern_too_broad",
+        "absence_pattern_present",
         "evidence_covers_whole_source",
         "evidence_kind_not_allowed",
         "evidence_not_in_context",
@@ -48,6 +51,15 @@ REASONS = frozenset(
 #: shown nothing about where the defect is.
 DEFAULT_MAX_EVIDENCE_CHARS = 2000
 DEFAULT_MAX_SOURCE_FRACTION = 0.5
+
+#: An absence claim has the same two degenerate escapes as a quote, mirrored.
+#: A pattern of one character is absent from almost nothing, so a floor exists.
+#: A pattern as long as the file is absent from it *by construction* -- any
+#: invented sentence of seventy characters is missing from an eighty-eight byte
+#: file whether or not the requirement is met -- so a ceiling exists too.  Both
+#: were found by measurement: the ceiling after three local models produced
+#: patterns of 70, 57 and 35 characters against that very file.
+DEFAULT_MAX_ABSENCE_SOURCE_FRACTION = 0.5
 
 REQUIRED_KEYS = frozenset({"requirement", "evidence", "detail"})
 
@@ -113,6 +125,31 @@ def _field(prefix: str, text: str) -> dict[str, object]:
     }
 
 
+def _clauses(requirements: str | Sequence[str]) -> tuple[str, ...]:
+    if isinstance(requirements, str):
+        return (requirements,)
+    clauses = tuple(requirements)
+    if not all(isinstance(clause, str) for clause in clauses):
+        raise TypeError("requirements must be str or a sequence of str")
+    return clauses
+
+
+def _states(
+    requirement: str, requirements: str | Sequence[str], whole_clause: bool
+) -> bool:
+    """Does the caller's requirement list actually contain this requirement?
+
+    With ``whole_clause`` the quoted requirement must equal one clause.  A
+    plain substring test over a joined brief lets a model quote a fragment
+    ("A balance must never be") or a span crossing two unrelated rules, and
+    then argue against something nobody wrote.
+    """
+    clauses = _clauses(requirements)
+    if whole_clause:
+        return requirement in clauses
+    return any(requirement in clause for clause in clauses)
+
+
 def _offsets(haystack: str, needle: str) -> list[int]:
     found: list[int] = []
     start = haystack.find(needle)
@@ -132,6 +169,10 @@ def check(
     max_evidence_chars: int = DEFAULT_MAX_EVIDENCE_CHARS,
     max_source_fraction: float | None = DEFAULT_MAX_SOURCE_FRACTION,
     absence_label: str | None = None,
+    absence_prefix: str | None = None,
+    min_absence_pattern_chars: int = 3,
+    max_absence_source_fraction: float | None = DEFAULT_MAX_ABSENCE_SOURCE_FRACTION,
+    require_whole_clause: bool = False,
 ) -> dict[str, object]:
     """Admit or refuse a batch of findings.  Fail-closed on the first refusal.
 
@@ -151,8 +192,15 @@ def check(
         raise ValueError("max_evidence_chars must not be below min_evidence_chars")
     if max_source_fraction is not None and not 0 < max_source_fraction <= 1:
         raise ValueError("max_source_fraction must be in (0, 1]")
-    if isinstance(requirements, str) is False:
-        raise TypeError("requirements must be str")
+    if isinstance(requirements, (str, list, tuple)) is False:
+        raise TypeError("requirements must be str or a sequence of str")
+    clauses = _clauses(requirements)
+    if absence_prefix is not None and not absence_prefix:
+        raise ValueError("absence_prefix must not be empty")
+    if min_absence_pattern_chars < 1:
+        raise ValueError("min_absence_pattern_chars must be at least 1")
+    if max_absence_source_fraction is not None and not 0 < max_absence_source_fraction <= 1:
+        raise ValueError("max_absence_source_fraction must be in (0, 1]")
 
     scoped = [
         source
@@ -184,6 +232,97 @@ def check(
         requirement = finding["requirement"]
         evidence = finding["evidence"]
 
+        # A model may only allege against a requirement the caller actually
+        # wrote.  Paraphrasing a requirement is how a review drifts into
+        # reviewing a rule nobody asked for.  Checked before anything else,
+        # because it applies to every form a finding can take.
+        if not _states(requirement, requirements, require_whole_clause):
+            raise GateError(
+                "requirement_not_exact_quote",
+                index=index,
+                **_field("requirement", requirement),
+            )
+
+        # The strong form of an absence claim.  Instead of asserting that
+        # something is missing, the model names the literal text it says is
+        # absent, and the gate searches for it.  Zero occurrences is a
+        # verified observation; one occurrence refutes the model.  This turns
+        # the one claim the gate previously had to take on trust into the one
+        # claim it can settle without reading the code.
+        if absence_prefix is not None and evidence.startswith(absence_prefix):
+            pattern = evidence[len(absence_prefix) :]
+            # Deliberately a lower floor than a quote's.  The two bounds
+            # guard against opposite failures: a short *quote* matches by
+            # accident and proves nothing, whereas a short *pattern* is
+            # harder to be absent, so its absence is the stronger claim.
+            # Applying the quote floor here would reject ``record(`` -- seven
+            # characters and exactly the right thing to search for.
+            if len(pattern) < min_absence_pattern_chars:
+                raise GateError(
+                    "absence_pattern_too_short",
+                    index=index,
+                    pattern_chars=len(pattern),
+                    min_absence_pattern_chars=min_absence_pattern_chars,
+                    **_field("evidence", evidence),
+                )
+            # Search before measuring breadth.  If the pattern is there, the
+            # model is refuted outright, and that is a stronger and more useful
+            # thing to report than "your pattern was too broad to be
+            # informative".  Refutation first, quality second.
+            found = [
+                {"source": source.name, "kind": source.kind, "offset": offset}
+                for source in scoped
+                for offset in _offsets(source.text, pattern)
+            ]
+            if found:
+                raise GateError(
+                    "absence_pattern_present",
+                    index=index,
+                    occurrences=len(found),
+                    sources=sorted({item["source"] for item in found}),
+                    **_field("evidence", evidence),
+                )
+            # The ceiling is measured against the *smallest* source searched,
+            # because the claim is "absent from everything you showed me", and
+            # that claim is only as strong as its weakest search.
+            if max_absence_source_fraction is not None and scoped:
+                smallest = min(max(len(source.text), 1) for source in scoped)
+                breadth = round(len(pattern) / smallest, 4)
+                if breadth > max_absence_source_fraction:
+                    raise GateError(
+                        "absence_pattern_too_broad",
+                        index=index,
+                        pattern_chars=len(pattern),
+                        smallest_source_chars=smallest,
+                        source_fraction=breadth,
+                        max_absence_source_fraction=max_absence_source_fraction,
+                        **_field("evidence", evidence),
+                    )
+            rows.append(
+                {
+                    "index": index,
+                    "quoted": False,
+                    "verified_absence": True,
+                    "absent_pattern_chars": len(pattern),
+                    "absent_pattern_fraction": (
+                        round(
+                            len(pattern)
+                            / min(max(len(source.text), 1) for source in scoped),
+                            4,
+                        )
+                        if scoped
+                        else None
+                    ),
+                    "searched_sources": [source.name for source in scoped],
+                    **_field("requirement", requirement),
+                    **_field("evidence", evidence),
+                    **_field("detail", finding["detail"]),
+                    "match_count": 0,
+                    "matches": [],
+                }
+            )
+            continue
+
         # Quotation cannot express absence.  A requirement such as "every
         # withdrawal must be recorded" is violated by code that is missing,
         # and missing code has no quotable location.  Measured on
@@ -196,16 +335,11 @@ def check(
         # via an exact declared label, and it is counted separately in the
         # receipt.  An absence finding is a lead, never evidence.
         if absence_label is not None and evidence == absence_label:
-            if requirement not in requirements:
-                raise GateError(
-                    "requirement_not_exact_quote",
-                    index=index,
-                    **_field("requirement", requirement),
-                )
             rows.append(
                 {
                     "index": index,
                     "quoted": False,
+                    "verified_absence": False,
                     **_field("requirement", requirement),
                     **_field("evidence", evidence),
                     **_field("detail", finding["detail"]),
@@ -214,16 +348,6 @@ def check(
                 }
             )
             continue
-
-        # A model may only allege against a requirement the caller actually
-        # wrote.  Paraphrasing a requirement is how a review drifts into
-        # reviewing a rule nobody asked for.
-        if requirement not in requirements:
-            raise GateError(
-                "requirement_not_exact_quote",
-                index=index,
-                **_field("requirement", requirement),
-            )
 
         if len(evidence) < min_evidence_chars:
             raise GateError(
@@ -296,6 +420,7 @@ def check(
             {
                 "index": index,
                 "quoted": True,
+                "verified_absence": False,
                 **_field("requirement", requirement),
                 **_field("evidence", evidence),
                 **_field("detail", finding["detail"]),
@@ -311,13 +436,23 @@ def check(
         # Kept apart on purpose: a reader must never be able to mistake the
         # number of located defects for the number of allegations.
         "quoted_finding_count": sum(1 for row in rows if row["quoted"]),
-        "unquoted_finding_count": sum(1 for row in rows if not row["quoted"]),
+        "verified_absence_count": sum(1 for row in rows if row["verified_absence"]),
+        "unverified_absence_count": sum(
+            1 for row in rows if not row["quoted"] and not row["verified_absence"]
+        ),
         "absence_label": absence_label,
+        "absence_prefix": absence_prefix,
+        "require_whole_clause": require_whole_clause,
+        "requirement_clause_count": len(clauses),
         "min_evidence_chars": min_evidence_chars,
         "max_evidence_chars": max_evidence_chars,
         "max_source_fraction": max_source_fraction,
+        "min_absence_pattern_chars": min_absence_pattern_chars,
+        "max_absence_source_fraction": max_absence_source_fraction,
         "allowed_kinds": sorted(allowed_kinds) if allowed_kinds is not None else None,
-        **_field("requirements", requirements),
+        # Canonical digest over the clause list, so a reader can tell whether
+        # two receipts were produced against the same requirements.
+        **_field("requirements", "\n".join(clauses)),
         "sources": [
             {"name": source.name, "kind": source.kind, **_digest(source.text)}
             for source in sources

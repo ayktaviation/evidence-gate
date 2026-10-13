@@ -8,10 +8,17 @@ the suite fails.
 from __future__ import annotations
 
 import json
+import pathlib
+import sys
 import unittest
 import unicodedata
 
-from evidence_gate import REASONS, EvidenceSource, Finding, GateError, check
+# So that `python -m unittest discover -s tests` works in a fresh clone with
+# nothing installed.  The gate has no dependencies; requiring an install step
+# to run its own controls would be a poor advertisement for that.
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent / "src"))
+
+from evidence_gate import REASONS, EvidenceSource, Finding, GateError, check  # noqa: E402
 
 REQUIREMENTS = "A balance must never be negative. The UI must show the balance."
 
@@ -100,6 +107,33 @@ REFUSALS: tuple[tuple[str, list, dict], ...] = (
         "evidence_not_in_context",
         [finding(evidence="if account.balance < 0: raise ValueError")],
         {},
+    ),
+    (
+        "absence_pattern_too_short",
+        [finding(evidence="absent:x")],
+        {"absence_prefix": "absent:"},
+    ),
+    (
+        # The model claimed something is missing that is plainly there.  This
+        # is the one absence claim a gate can settle outright.
+        "absence_pattern_present",
+        [finding(evidence="absent:account.balance -= amount")],
+        {"absence_prefix": "absent:", "allowed_kinds": frozenset({"source"})},
+    ),
+    (
+        # The mirror of evidence_covers_whole_source.  A whole invented
+        # sentence is missing from a short file whether or not the requirement
+        # is met, so its absence carries no information.
+        "absence_pattern_too_broad",
+        [
+            finding(
+                evidence=(
+                    "absent:if amount > account.balance:\n"
+                    "        raise ValueError('insufficient funds')\n"
+                )
+            )
+        ],
+        {"absence_prefix": "absent:", "allowed_kinds": frozenset({"source"})},
     ),
 )
 
@@ -313,10 +347,12 @@ class AbsenceTests(unittest.TestCase):
         )
         self.assertEqual(2, receipt["finding_count"])
         self.assertEqual(1, receipt["quoted_finding_count"])
-        self.assertEqual(1, receipt["unquoted_finding_count"])
+        self.assertEqual(1, receipt["unverified_absence_count"])
+        self.assertEqual(0, receipt["verified_absence_count"])
         self.assertEqual(self.LABEL, receipt["absence_label"])
         unquoted = receipt["findings"][1]
         self.assertIs(False, unquoted["quoted"])
+        self.assertIs(False, unquoted["verified_absence"])
         self.assertEqual(0, unquoted["match_count"])
         self.assertEqual([], unquoted["matches"])
 
@@ -351,6 +387,149 @@ class AbsenceTests(unittest.TestCase):
                 absence_label=self.LABEL,
             )
         self.assertEqual("evidence_not_in_context", caught.exception.reason)
+
+
+class VerifiedAbsenceTests(unittest.TestCase):
+    """The strong form: the model names what is missing and the gate looks."""
+
+    MISSING = "Every withdrawal must be recorded"
+    PREFIX = "absent:"
+
+    def _check(self, pattern: str, **kwargs):
+        return check(
+            [
+                finding(
+                    requirement=self.MISSING,
+                    evidence=self.PREFIX + pattern,
+                    detail="Nothing in the file records the withdrawal.",
+                )
+            ],
+            requirements=[self.MISSING, "A balance must never be negative"],
+            sources=SOURCES,
+            absence_prefix=self.PREFIX,
+            **kwargs,
+        )
+
+    def test_absence_of_named_text_is_verified_not_trusted(self):
+        receipt = self._check("record(")
+        row = receipt["findings"][0]
+        self.assertIs(True, row["verified_absence"])
+        self.assertIs(False, row["quoted"])
+        self.assertEqual(1, receipt["verified_absence_count"])
+        self.assertEqual(0, receipt["unverified_absence_count"])
+        # Which text was searched is recorded, so the search is repeatable.
+        self.assertEqual(7, row["absent_pattern_chars"])
+        self.assertEqual(["account.py", "response-1"], row["searched_sources"])
+
+    def test_a_false_absence_claim_is_refused_with_its_locations(self):
+        with self.assertRaises(GateError) as caught:
+            self._check("account.balance")
+        self.assertEqual("absence_pattern_present", caught.exception.reason)
+        self.assertEqual(2, caught.exception.diagnostic["occurrences"])
+        self.assertEqual(["account.py"], caught.exception.diagnostic["sources"])
+
+    def test_search_respects_the_declared_scope(self):
+        # A pattern absent from source but present in an out-of-scope
+        # observation is still a verified absence *of the source*, and the
+        # receipt says which sources were searched.
+        receipt = self._check("balance\": -40", allowed_kinds=frozenset({"source"}))
+        self.assertIs(True, receipt["findings"][0]["verified_absence"])
+        self.assertEqual(["account.py"], receipt["findings"][0]["searched_sources"])
+
+    def test_absence_floor_is_lower_than_the_quote_floor(self):
+        # The two bounds exist for opposite reasons; a seven-character search
+        # pattern is admissible while a seven-character quote is not.
+        self.assertIs(True, self._check("record(")["findings"][0]["verified_absence"])
+        with self.assertRaises(GateError) as caught:
+            check(
+                [finding(evidence="amount)")],
+                requirements=REQUIREMENTS,
+                sources=SOURCES,
+            )
+        self.assertEqual("evidence_too_short", caught.exception.reason)
+
+    def test_a_pattern_as_long_as_the_file_is_refused_as_uninformative(self):
+        # Found by measurement, not by design: three local models asked to
+        # name the missing code produced patterns of 70, 57 and 35 characters
+        # against an 88-byte file.  The first two are absent from it whatever
+        # the code says, which is the same vacuous pass as quoting the whole
+        # file, arrived at from the other direction.
+        with self.assertRaises(GateError) as caught:
+            self._check(
+                "if amount > account.balance:\n        raise ValueError('no')\n",
+                allowed_kinds=frozenset({"source"}),
+            )
+        self.assertEqual("absence_pattern_too_broad", caught.exception.reason)
+        self.assertGreater(caught.exception.diagnostic["source_fraction"], 0.5)
+
+    def test_breadth_is_recorded_so_a_weak_absence_is_visible(self):
+        row = self._check("record(", allowed_kinds=frozenset({"source"}))["findings"][0]
+        self.assertEqual(0.0795, row["absent_pattern_fraction"])
+
+    def test_a_present_pattern_is_refuted_before_it_is_judged_broad(self):
+        # Both bounds would fire.  The refutation is reported, because "that
+        # text is in the file" tells the caller something true about the code,
+        # while "your pattern was too broad" only grades the question.
+        with self.assertRaises(GateError) as caught:
+            self._check(
+                "def withdraw(account, amount):\n    account.balance -= amount\n",
+                allowed_kinds=frozenset({"source"}),
+            )
+        self.assertEqual("absence_pattern_present", caught.exception.reason)
+
+    def test_the_ceiling_can_be_disabled_but_not_set_absurdly(self):
+        long_pattern = "if amount > account.balance:\n        raise ValueError('no')\n"
+        receipt = self._check(
+            long_pattern,
+            allowed_kinds=frozenset({"source"}),
+            max_absence_source_fraction=None,
+        )
+        self.assertIs(True, receipt["findings"][0]["verified_absence"])
+        self.assertIsNone(receipt["max_absence_source_fraction"])
+        with self.assertRaises(ValueError):
+            self._check("record(", max_absence_source_fraction=0)
+
+    def test_empty_prefix_is_rejected(self):
+        with self.assertRaises(ValueError):
+            check([], requirements=REQUIREMENTS, sources=SOURCES, absence_prefix="")
+
+
+class ClauseTests(unittest.TestCase):
+    CLAUSES = ("A balance must never be negative", "The UI must show the balance")
+
+    def test_a_requirement_fragment_is_admissible_by_default(self):
+        receipt = check(
+            [finding(requirement="A balance must never be")],
+            requirements=self.CLAUSES,
+            sources=SOURCES,
+        )
+        self.assertEqual(2, receipt["requirement_clause_count"])
+
+    def test_whole_clause_mode_refuses_a_fragment(self):
+        with self.assertRaises(GateError) as caught:
+            check(
+                [finding(requirement="A balance must never be")],
+                requirements=self.CLAUSES,
+                sources=SOURCES,
+                require_whole_clause=True,
+            )
+        self.assertEqual("requirement_not_exact_quote", caught.exception.reason)
+
+    def test_whole_clause_mode_admits_an_exact_clause(self):
+        receipt = check(
+            [finding()],
+            requirements=self.CLAUSES,
+            sources=SOURCES,
+            require_whole_clause=True,
+        )
+        self.assertIs(True, receipt["require_whole_clause"])
+
+    def test_clause_order_changes_the_requirements_digest(self):
+        first = check([finding()], requirements=self.CLAUSES, sources=SOURCES)
+        second = check(
+            [finding()], requirements=tuple(reversed(self.CLAUSES)), sources=SOURCES
+        )
+        self.assertNotEqual(first["requirements_sha256"], second["requirements_sha256"])
 
 
 class ReceiptTests(unittest.TestCase):

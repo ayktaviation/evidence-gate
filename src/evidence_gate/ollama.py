@@ -24,6 +24,8 @@ class Answer:
     model: str
     model_digest: str | None
     prompt_sha256: str
+    system_sha256: str
+    options_sha256: str
     output_sha256: str
     output_bytes: int
 
@@ -32,6 +34,16 @@ class Answer:
             "model": self.model,
             "model_digest": self.model_digest,
             "prompt_sha256": self.prompt_sha256,
+            # The system prompt is hashed separately because changing the
+            # instructions while leaving the question alone is the most common
+            # thing a measurement does, and it must not produce a receipt
+            # identical to the previous run's.  Observed exactly that: the
+            # absence-form instruction changed, results went from 1 of 3 to
+            # 3 of 3, and prompt_sha256 did not move.
+            "system_sha256": self.system_sha256,
+            # Likewise temperature, seed and token budget: an empty answer
+            # caused by a budget is not the same event as a model declining.
+            "options_sha256": self.options_sha256,
             "output_sha256": self.output_sha256,
             "output_bytes": self.output_bytes,
         }
@@ -105,11 +117,17 @@ def ask(
     pinned = digest(model, endpoint=endpoint)
     reply = _post(endpoint, "/api/generate", payload, seconds)
     text = str(reply.get("response", ""))
+    settings = json.dumps(
+        {**payload["options"], "think": payload.get("think")},  # type: ignore[dict-item]
+        sort_keys=True,
+    )
     return Answer(
         text=text,
         model=model,
         model_digest=pinned,
         prompt_sha256=hashlib.sha256(prompt.encode("utf-8")).hexdigest(),
+        system_sha256=hashlib.sha256(system.encode("utf-8")).hexdigest(),
+        options_sha256=hashlib.sha256(settings.encode("utf-8")).hexdigest(),
         output_sha256=hashlib.sha256(text.encode("utf-8")).hexdigest(),
         output_bytes=len(text.encode("utf-8")),
     )

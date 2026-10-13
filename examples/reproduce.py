@@ -31,17 +31,24 @@ SUBJECT = """def withdraw(account, amount):
     return account.balance
 """
 
-ABSENCE = "absence:no-such-code"
+ABSENCE_PREFIX = "absent:"
 
 SYSTEM = (
     "You review source code against a list of requirements. "
     "Reply with JSON only: {\"findings\": [{\"requirement\": ..., "
     "\"evidence\": ..., \"detail\": ...}]}. "
     "'requirement' must be copied exactly from the requirements. "
-    "'evidence' must be copied exactly from the source code, character for "
-    "character, and must be a short span, not the whole file. "
-    f"If the defect is that required code is missing, write exactly {ABSENCE!r} "
-    "as the evidence. Never write a quote you did not copy."
+    "For a defect in code that IS present, 'evidence' must be copied exactly "
+    "from the source code, character for character, as a short span -- never "
+    "the whole file. "
+    f"For a defect caused by MISSING code, write {ABSENCE_PREFIX!r} followed by "
+    "a short literal fragment that would have to appear in the file if the "
+    "requirement were met, and that does not appear in it. The reviewer will "
+    "search the file for that fragment; if it is found, your finding is "
+    "rejected. Keep that fragment under 20 characters -- a name or a call, "
+    "such as 'log(' or 'raise ', not a whole statement you invented, because a "
+    "long invented line is missing from the file no matter what the code does. "
+    "Never write a quote you did not copy."
 )
 
 EXPLANATIONS = {
@@ -62,6 +69,22 @@ EXPLANATIONS = {
     "requirement_not_exact_quote": (
         "The model reviewed against a requirement it paraphrased rather than "
         "one that was given to it."
+    ),
+    "absence_pattern_present": (
+        "The model declared that some code is missing and named the text it "
+        "claimed was absent -- and that text is in the file. This is the one "
+        "kind of absence claim the gate can settle on its own, and it is "
+        "refuted, not merely unsupported."
+    ),
+    "absence_pattern_too_short": (
+        "The absence claim named too little text to be meaningful. A fragment "
+        "of one or two characters is absent from almost nothing."
+    ),
+    "absence_pattern_too_broad": (
+        "The absence claim named so much text that its absence carries no "
+        "information: a whole invented statement is missing from a short file "
+        "whether or not the requirement is met. This is the same vacuous pass "
+        "as quoting the entire file, reached from the other direction."
     ),
     "_other": "The findings were refused before any judgement of their merit.",
 }
@@ -133,7 +156,7 @@ def main() -> int:
             findings,
             requirements=REQUIREMENTS,
             sources=sources,
-            absence_label=ABSENCE,
+            absence_prefix=ABSENCE_PREFIX,
         )
     except GateError as refusal:
         print(f"\nREFUSED: {refusal.reason}")
@@ -148,13 +171,15 @@ def main() -> int:
     print(
         f"\nADMITTED: {receipt['finding_count']} finding(s) -- "
         f"{receipt['quoted_finding_count']} located in the source, "
-        f"{receipt['unquoted_finding_count']} declared as missing code"
+        f"{receipt['verified_absence_count']} named missing code that the gate "
+        f"searched for and did not find"
     )
     print(json.dumps(receipt, indent=2, sort_keys=True))
     print(
-        "\nEvery quote was located in the source. This says the findings are "
-        "admissible, not that they are correct. The unquoted ones are leads, "
-        "not evidence."
+        "\nEvery quote was located in the source, and every absence claim was "
+        "searched for and not found. That makes the findings admissible, not "
+        "correct: an absence verified in this file is still only a lead about "
+        "the requirement."
     )
     return 0
 
