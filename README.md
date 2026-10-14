@@ -355,7 +355,7 @@ the 36 holdout cases, and those were spent once and are not reusable.
 
 ```bash
 cd evidence-gate
-python -m unittest discover -s tests          # 88 tests, no dependencies, no install
+python -m unittest discover -s tests          # 93 tests, no dependencies, no install
 python tools/check_claims.py                  # the README's own numbers, verified
 
 # with a local Ollama running:

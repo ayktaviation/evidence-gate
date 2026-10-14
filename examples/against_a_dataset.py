@@ -366,6 +366,54 @@ def _localised(receipt: dict, case: dict) -> bool:
     return False
 
 
+def _record(options, results: list[dict], *, complete: bool) -> None:
+    """Write the run so far, after every case rather than at the end.
+
+    Written incrementally because the first version was not.  A run is thirty-
+    six sequential model calls, roughly twenty-five minutes, and the whole file
+    was written after the last one -- so a reviewer that died on case thirty-
+    five destroyed every answer before it and left no record that the attempt
+    had happened.  In a repository whose rule is that failed runs are preserved,
+    the measurement harness was the one place that discarded them.
+
+    ``complete`` is the reason this is safe.  A partial file is a real record of
+    a real attempt and worth keeping, but it must never be mistaken for a
+    finished arm: thirty-four cases of a thirty-six case run is a different
+    denominator, and nothing downstream could tell.  So the flag is written
+    explicitly and ``tools/significance.py`` refuses a run that carries
+    ``false``.  Run files recorded before this field existed omit it, and are
+    read as complete, which they are -- the flag narrows what is accepted
+    without rewriting history.
+    """
+    if not options.out:
+        return
+    admitted = [r for r in results if r["outcome"] == "admitted"]
+    options.out.write_text(
+        json.dumps(
+            {
+                "dataset": str(options.dataset),
+                "renamed": options.rename,
+                # Recorded separately from ``renamed`` so an old run file
+                # keeps meaning exactly what it meant: absent is false,
+                # and the three arms stay distinguishable in the receipt
+                # rather than by which filename someone chose.
+                "normalised": options.normalise,
+                "model": options.model,
+                "seed": options.seed,
+                "complete": complete,
+                "cases": len(results),
+                "admitted": len(admitted),
+                "localised": len([r for r in admitted if r["localised"]]),
+                "results": results,
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--dataset", type=pathlib.Path, required=True)
@@ -439,6 +487,11 @@ def main() -> int:
             )
         except ReviewerUnavailable as failure:
             print(f"reviewer unavailable: {failure}", file=sys.stderr)
+            # The cases already answered are kept and marked incomplete.  This
+            # is the path that used to throw away half an hour of model calls.
+            _record(options, results, complete=False)
+            if options.out:
+                print(f"kept {len(results)} answered cases in {options.out}", file=sys.stderr)
             return 2
 
         row = {
@@ -494,8 +547,13 @@ def main() -> int:
             "admitted": "LOCALISED" if row.get("localised") else "admitted",
             "refused": f"refused {row.get('reason', '')}",
         }.get(row["outcome"], row["outcome"])
-        print(f"  [{number:2d}/{len(selected)}] {case['name']:28s} {mark}")
+        # ``flush`` because stdout is block-buffered when this is piped to a
+        # file or a log, which is how a twenty-five minute run was invoked.
+        # Without it the progress lines all arrive at the end, and a run that
+        # is working is indistinguishable from one that has hung.
+        print(f"  [{number:2d}/{len(selected)}] {case['name']:28s} {mark}", flush=True)
         results.append(row)
+        _record(options, results, complete=False)
 
     admitted = [r for r in results if r["outcome"] == "admitted"]
     localised = [r for r in admitted if r["localised"]]
@@ -551,29 +609,7 @@ def main() -> int:
         print(f"evidence reuse across admitted findings: {reuse}")
 
     if options.out:
-        options.out.write_text(
-            json.dumps(
-                {
-                    "dataset": str(options.dataset),
-                    "renamed": options.rename,
-                    # Recorded separately from ``renamed`` so an old run file
-                    # keeps meaning exactly what it meant: absent is false,
-                    # and the three arms stay distinguishable in the receipt
-                    # rather than by which filename someone chose.
-                    "normalised": options.normalise,
-                    "model": options.model,
-                    "seed": options.seed,
-                    "cases": len(results),
-                    "admitted": len(admitted),
-                    "localised": len(localised),
-                    "results": results,
-                },
-                indent=2,
-                sort_keys=True,
-            )
-            + "\n",
-            encoding="utf-8",
-        )
+        _record(options, results, complete=True)
         print(f"\nwrote {options.out}")
     return 0
 

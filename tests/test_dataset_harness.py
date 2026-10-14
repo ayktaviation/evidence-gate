@@ -182,6 +182,53 @@ class GroundTruthExtraction(unittest.TestCase):
         self.assertIn("%", renamed, "the operation itself must be untouched")
         self.assertIn("return", renamed)
 
+    def test_a_partial_run_is_written_to_disk_and_marked_incomplete(self):
+        """Answers already paid for must survive a crash on a later case.
+
+        A run is thirty-six sequential model calls and roughly twenty-five
+        minutes.  The first version wrote the file only after the last call,
+        so a reviewer dying on case thirty-five discarded every answer before
+        it and left no record the attempt had happened -- in a repository
+        whose rule is that failed runs are preserved.
+        """
+        import argparse
+        import json
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as directory:
+            out = pathlib.Path(directory) / "partial.json"
+            options = argparse.Namespace(
+                out=out,
+                dataset=pathlib.Path("/nowhere"),
+                rename=False,
+                normalise=False,
+                model="m",
+                seed=1,
+            )
+            rows = [{"outcome": "admitted", "localised": True, "case": "a"}]
+
+            harness._record(options, rows, complete=False)
+            self.assertTrue(out.exists(), "a partial run left nothing on disk")
+            partial = json.loads(out.read_text(encoding="utf-8"))
+            self.assertIs(False, partial["complete"])
+            self.assertEqual(1, partial["cases"])
+
+            rows.append({"outcome": "refused", "reason": "r", "case": "b"})
+            harness._record(options, rows, complete=True)
+            final = json.loads(out.read_text(encoding="utf-8"))
+            self.assertIs(True, final["complete"])
+            self.assertEqual(2, final["cases"])
+            self.assertEqual(1, final["admitted"])
+
+    def test_recording_without_an_out_path_is_not_an_error(self):
+        """The run file is optional, and the incremental write must respect that."""
+        import argparse
+
+        harness._record(
+            argparse.Namespace(out=None), [{"outcome": "admitted", "localised": True}],
+            complete=False,
+        )
+
 
 @unittest.skipUnless(DATASET, "set EVIDENCE_GATE_DATASET to a QuixBugs checkout")
 class AgainstTheRealDataset(unittest.TestCase):

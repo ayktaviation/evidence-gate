@@ -230,6 +230,38 @@ class ArmIdentification(unittest.TestCase):
         self.assertNotIn("normalised", json.loads(path.read_text()))
         self.assertEqual("published", stats.summarise(path)["arm"])
 
+    def test_an_incomplete_run_is_refused_rather_than_analysed(self):
+        """A partial run file must not be testable for significance.
+
+        The harness writes after every case so a crash cannot destroy the
+        answers before it.  That safety creates a new hazard: a file on disk
+        is no longer necessarily a finished arm, and a tool that happily
+        reports p-values for the first nineteen cases of a thirty-six case run
+        is stopping an experiment once it looks good.
+        """
+        with self.assertRaises(SystemExit) as refusal:
+            stats.summarise(self.run_file(complete=False))
+        self.assertIn("incomplete", str(refusal.exception))
+
+    def test_a_run_marked_complete_is_analysed(self):
+        self.assertEqual(
+            "published", stats.summarise(self.run_file(complete=True))["arm"]
+        )
+
+    def test_a_run_predating_the_completeness_flag_is_still_analysed(self):
+        """The flag narrows what is accepted without rewriting history.
+
+        Every run recorded before the harness wrote this field omits it, and
+        those runs are complete.  Treating a missing flag as incomplete would
+        retroactively invalidate measurements that were fine, which is the
+        mirror image of the error this check exists to prevent.
+        """
+        path = self.run_file()
+        import json
+
+        self.assertNotIn("complete", json.loads(path.read_text()))
+        self.assertEqual("published", stats.summarise(path)["arm"])
+
     def test_restricting_to_shared_cases_changes_the_counts_it_should(self):
         """``--paired`` exists because the arms are not the same programs.
 

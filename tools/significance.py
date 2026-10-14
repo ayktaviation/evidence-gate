@@ -148,6 +148,17 @@ def summarise(path: pathlib.Path, keep: set[str] | None = None) -> dict:
     per-case rows are in the run files already.
     """
     run = json.loads(path.read_text(encoding="utf-8"))
+    # The harness writes its run file after every case so a crash cannot
+    # destroy the answers before it, which means a file on disk is not
+    # necessarily a finished arm.  Testing a partial arm for significance is
+    # the quiet version of stopping an experiment once it looks good, so it is
+    # refused here rather than disclaimed.  Absent flag means a run recorded
+    # before the flag existed: those are complete.
+    if run.get("complete") is False:
+        raise SystemExit(
+            f"{path}: run is marked incomplete ({len(run['results'])} cases); "
+            "it records an attempt, not a measurable arm"
+        )
     results = run["results"]
     if keep is not None:
         results = [r for r in results if r["case"] in keep]
