@@ -53,6 +53,20 @@ REASONS = frozenset(
 DEFAULT_MAX_EVIDENCE_CHARS = 2000
 DEFAULT_MAX_SOURCE_FRACTION = 0.5
 
+#: The floors were literals in ``check``'s signature while the ceilings had
+#: names, which made two of the six versioned bounds unquotable: the changelog
+#: calls tightening any default a breaking change, and a caller cannot assert
+#: against a number it can only read in a function signature.  Named here at
+#: their existing values.  Nothing moved.
+DEFAULT_MIN_EVIDENCE_CHARS = 8
+
+#: Lower than the quote floor on purpose, and the asymmetry is the point.  A
+#: short quote matches by accident, so eight characters is a weak claim; a
+#: short pattern is *harder* to be absent, so its absence is a stronger one.
+#: ``record(`` is seven characters: inadmissible as a quote, exactly right as
+#: a search pattern.
+DEFAULT_MIN_ABSENCE_PATTERN_CHARS = 3
+
 #: An absence claim has the same two degenerate escapes as a quote, mirrored.
 #: A pattern of one character is absent from almost nothing, so a floor exists.
 #: A pattern as long as the file is absent from it *by construction* -- any
@@ -209,12 +223,12 @@ def check(
     requirements: str,
     sources: Sequence[EvidenceSource],
     allowed_kinds: frozenset[str] | set[str] | None = None,
-    min_evidence_chars: int = 8,
+    min_evidence_chars: int = DEFAULT_MIN_EVIDENCE_CHARS,
     max_evidence_chars: int = DEFAULT_MAX_EVIDENCE_CHARS,
     max_source_fraction: float | None = DEFAULT_MAX_SOURCE_FRACTION,
     absence_label: str | None = None,
     absence_prefix: str | None = None,
-    min_absence_pattern_chars: int = 3,
+    min_absence_pattern_chars: int = DEFAULT_MIN_ABSENCE_PATTERN_CHARS,
     max_absence_source_fraction: float | None = DEFAULT_MAX_ABSENCE_SOURCE_FRACTION,
     max_absence_pattern_chars: int | None = DEFAULT_MAX_ABSENCE_PATTERN_CHARS,
     require_whole_clause: bool = False,

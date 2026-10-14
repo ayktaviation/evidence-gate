@@ -36,6 +36,30 @@ reported less than it knew. Admissibility is unchanged and a control asserts
 that, since a receipt field that quietly starts refusing things is a
 tightening in disguise.
 
+**Not breaking, additive:** the six default bounds are exported from the
+package, and two of them have names for the first time.
+
+The policy above makes a default bound public — tightening one is breaking —
+and yet `min_evidence_chars` (8) and `min_absence_pattern_chars` (3) were bare
+literals in `check`'s signature while the four ceilings had constants. A caller
+who depends on a versioned number could only copy it, and a changelog entry
+naming a floor had nothing to be checked against. Both are now named at their
+existing values and the signature uses them; a control asserts the signature
+default *is* the exported constant, because a named bound the function does not
+use is worse than an unnamed one — the caller asserts against the name, the
+gate applies the literal, and the disagreement shows up only when something is
+admitted that the caller believed was refused.
+
+`REQUIRED_KEYS` is exported for the same reason: it is already the content of
+the `finding_key_set_mismatch` refusal. Nothing moved, nothing is admitted that
+was not admitted before, and `__all__` is now checked to be importable and free
+of imported modules.
+
+The README's one *derived* figure is checked too: the absence fraction and the
+absolute cap cross at 80 characters, which is arithmetic over two bounds rather
+than a measurement or a choice. Either input moving silently invalidates the
+sentence, and a derived number is the kind nobody recomputes.
+
 **Not breaking, additive:** `ollama.py` has controls for the first time, 29 of
 them, and `check_claims.py` fails if the README's count of them drifts.
 

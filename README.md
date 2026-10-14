@@ -25,7 +25,7 @@ Copy `src/evidence_gate/` into your project, or `pip install -e .`. Python 3.10+
 standard library only. The floor is enforced to agree across the README, the
 packaging metadata and the CI matrix, because it did not: this file claimed
 3.11 while `requires-python` said 3.10, and nothing checked. The suite has been
-run here on 3.9.6, 3.12.13 and 3.14.5 — all 144 tests, no skips beyond the 8
+run here on 3.9.6, 3.12.13 and 3.14.5 — all 148 tests, no skips beyond the 8
 that need a model — so 3.10 and 3.11 sit between two passing versions rather
 than having been executed. That is a bracket, not a measurement, and the CI
 matrix that would close it has not run yet.
@@ -426,7 +426,7 @@ how it counted cannot be verified at all.
 
 ```bash
 cd evidence-gate
-python -m unittest discover -s tests          # 144 tests, no dependencies, no install
+python -m unittest discover -s tests          # 148 tests, no dependencies, no install
 python tools/check_claims.py                  # the README's own numbers, verified
 
 # with a local Ollama running:

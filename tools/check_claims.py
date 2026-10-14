@@ -22,7 +22,7 @@ import unittest
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 
-from evidence_gate import REASONS, EvidenceSource, __version__, check  # noqa: E402
+from evidence_gate import REASONS, EvidenceSource, __version__, check, gate  # noqa: E402
 
 # Read off a real receipt rather than grepped from the source.  A field name
 # that appears in a dict literal is not proof the field is emitted; running
@@ -294,6 +294,58 @@ def check_the_blind_spot_is_documented(report: list[str]) -> list[str]:
     return problems
 
 
+def check_the_documented_bounds_agree(report: list[str]) -> list[str]:
+    """The prose states bound values and one number derived from two of them.
+
+    The versioning policy makes a default bound public: tightening one is a
+    breaking change, and both tightenings so far are recorded with the
+    measurement that forced them.  That makes the numbers in the prose part of
+    the claim, and nothing was comparing them to the code -- so a bound could
+    be changed with the changelog left describing the old one, which is the
+    exact failure the policy exists to prevent.
+
+    The crossing point is here because it is the only figure in the README
+    that is neither measured nor chosen but *derived*: the fraction permits
+    half the source and the cap permits forty characters, so the cap binds
+    alone above eighty.  Either input moving silently invalidates the
+    sentence, and a derived number is the kind nobody recomputes.
+    """
+    prose = _readme() + (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
+    problems = []
+    stated = {
+        "min_evidence_chars": gate.DEFAULT_MIN_EVIDENCE_CHARS,
+        "min_absence_pattern_chars": gate.DEFAULT_MIN_ABSENCE_PATTERN_CHARS,
+    }
+    for name, value in stated.items():
+        # Only where the prose actually gives a number beside the name; a
+        # bare mention is not a claim about the value.
+        for found in re.findall(rf"`{name}`,?\s*(\d+)", prose):
+            if int(found) != value:
+                problems.append(
+                    f"the prose says {name} is {found}, the code says {value}"
+                )
+    crossing = gate.DEFAULT_MAX_ABSENCE_PATTERN_CHARS / (
+        gate.DEFAULT_MAX_ABSENCE_SOURCE_FRACTION or 1
+    )
+    claimed = {int(n) for n in re.findall(r"cross at (\d+) characters", prose)}
+    report.append(
+        f"documented bounds: floors {sorted(stated.values())}, "
+        f"bounds cross at {crossing:g}"
+    )
+    if not claimed:
+        problems.append(
+            "the prose no longer states where the two absence bounds cross, so "
+            "the derived figure check is dead"
+        )
+    elif claimed != {int(crossing)}:
+        problems.append(
+            f"the prose says the absence bounds cross at {sorted(claimed)} "
+            f"characters; {gate.DEFAULT_MAX_ABSENCE_PATTERN_CHARS} and "
+            f"{gate.DEFAULT_MAX_ABSENCE_SOURCE_FRACTION} cross at {crossing:g}"
+        )
+    return problems
+
+
 def check_the_reviewer_is_controlled(report: list[str]) -> list[str]:
     """The optional reviewer ships in the package, so it is a public surface.
 
@@ -525,6 +577,7 @@ CHECKS = (
     check_the_python_floor_agrees,
     check_the_typed_marker_is_earned,
     check_the_blind_spot_is_documented,
+    check_the_documented_bounds_agree,
     check_the_reviewer_is_controlled,
     check_the_skipped_control_count,
     check_the_measurement_arithmetic,

@@ -900,5 +900,84 @@ class ContractTests(unittest.TestCase):
             check([], requirements=None, sources=SOURCES)
 
 
+class ThePublicSurfaceIsWhatItSays(unittest.TestCase):
+    """``__all__`` is a promise, and nothing was checking it.
+
+    This package's argument is that an unverified claim is worth less than an
+    absent one, and its own export list was an unverified claim: a name listed
+    but not importable fails only for whoever tries it.
+
+    The bounds are in here because the versioning policy already treats them
+    as public -- tightening a default is a breaking change -- while two of the
+    six were bare literals in ``check``'s signature, so a caller depending on
+    a versioned number could only copy it.
+    """
+
+    BOUNDS = {
+        "DEFAULT_MIN_EVIDENCE_CHARS": ("min_evidence_chars", 8),
+        "DEFAULT_MAX_EVIDENCE_CHARS": ("max_evidence_chars", 2000),
+        "DEFAULT_MAX_SOURCE_FRACTION": ("max_source_fraction", 0.5),
+        "DEFAULT_MIN_ABSENCE_PATTERN_CHARS": ("min_absence_pattern_chars", 3),
+        "DEFAULT_MAX_ABSENCE_SOURCE_FRACTION": ("max_absence_source_fraction", 0.5),
+        "DEFAULT_MAX_ABSENCE_PATTERN_CHARS": ("max_absence_pattern_chars", 40),
+    }
+
+    def test_every_declared_name_is_importable(self):
+        import evidence_gate
+
+        for name in evidence_gate.__all__:
+            with self.subTest(name=name):
+                self.assertTrue(
+                    hasattr(evidence_gate, name),
+                    f"{name} is promised by __all__ and is not there",
+                )
+
+    def test_every_bound_is_reachable_from_the_top_level(self):
+        import evidence_gate
+
+        for name in self.BOUNDS:
+            with self.subTest(name=name):
+                self.assertIn(name, evidence_gate.__all__)
+
+    def test_the_signature_defaults_are_the_exported_constants(self):
+        """Otherwise the constant is documentation and the literal decides.
+
+        Naming a bound and then not using it is worse than leaving it
+        unnamed: a caller asserts against the name, the gate applies the
+        literal, and the disagreement stays invisible until something is
+        admitted that the caller believed was refused.
+        """
+        import inspect
+
+        import evidence_gate
+
+        defaults = inspect.signature(check).parameters
+        for name, (parameter, value) in self.BOUNDS.items():
+            with self.subTest(parameter=parameter):
+                self.assertEqual(
+                    value,
+                    getattr(evidence_gate, name),
+                    f"{name} is not the value this suite was written against",
+                )
+                self.assertEqual(
+                    getattr(evidence_gate, name),
+                    defaults[parameter].default,
+                    f"check()'s {parameter} default is not {name}",
+                )
+
+    def test_no_import_machinery_is_exported(self):
+        """A module reachable as a package attribute is not an interface.
+
+        ``hashlib`` is imported by ``gate``, so it is reachable, and listing
+        anything like it would promise a surface this library does not
+        support.
+        """
+        import evidence_gate
+
+        for leak in ("hashlib", "gate", "ollama", "re", "unicodedata"):
+            with self.subTest(leak=leak):
+                self.assertNotIn(leak, evidence_gate.__all__)
+
+
 if __name__ == "__main__":
     unittest.main()
