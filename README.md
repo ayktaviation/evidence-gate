@@ -264,7 +264,7 @@ python examples/at_scale.py  --model qwen3:8b   # the 26 KB one, which fails
 
 # against a third party's ground truth (QuixBugs checkout, not vendored here):
 export EVIDENCE_GATE_DATASET=/path/to/QuixBugs
-python -m unittest discover -s tests          # 5 harness controls stop skipping
+python -m unittest discover -s tests          # 8 harness controls stop skipping
 python examples/against_a_dataset.py --dataset "$EVIDENCE_GATE_DATASET" \
        --model devstral:24b                   # how often admissible means correct
 python examples/against_a_dataset.py --dataset "$EVIDENCE_GATE_DATASET" \

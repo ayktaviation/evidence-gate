@@ -11,8 +11,10 @@ Run it directly; it prints what it verified and exits non-zero on drift.
 """
 from __future__ import annotations
 
+import os
 import pathlib
 import re
+import subprocess
 import sys
 import unittest
 
@@ -167,6 +169,58 @@ def check_the_blind_spot_is_documented(report: list[str]) -> list[str]:
     return problems
 
 
+def check_the_skipped_control_count(report: list[str]) -> list[str]:
+    """The README says how many controls a dataset checkout unlocks.
+
+    Added because that number was wrong.  The README claimed five while the
+    suite had grown to eight, and nothing here noticed -- an unverified count
+    in a repository whose argument is that an unverified claim is worth less
+    than an absent one.  The number is small, which is exactly why it rotted:
+    nobody recounts a number they can nearly remember.
+
+    Counted in a subprocess with the variable removed from the environment,
+    which is the same thing a reader does when they run the command the README
+    prints.  Doing it in this process does not work, and the first version of
+    this check was wrong in exactly that way: the gated module reads the
+    variable once at import time, discovery has already imported it by the
+    time this runs, and unsetting the variable afterwards changes nothing.
+    The check passed with the variable unset and failed with it set -- a
+    checker whose answer depended on the environment it happened to be
+    invoked in.
+    """
+    readme = _readme()
+    claimed = {
+        int(found)
+        for found in re.findall(r"(\d+) harness controls stop skipping", readme)
+    }
+    if not claimed:
+        return ["README no longer states how many controls the dataset unlocks"]
+
+    environment = {k: v for k, v in os.environ.items() if k != "EVIDENCE_GATE_DATASET"}
+    finished = subprocess.run(
+        [sys.executable, "-m", "unittest", "discover", "-s", "tests", "-v"],
+        cwd=str(ROOT),
+        env=environment,
+        capture_output=True,
+        text=True,
+    )
+    actual = finished.stderr.count("... skipped")
+    report.append(
+        f"dataset controls: README says {sorted(claimed)}, suite skips {actual}"
+    )
+    if finished.returncode != 0:
+        return [
+            "the suite does not pass without a dataset, so the skip count "
+            "cannot be trusted"
+        ]
+    if claimed != {actual}:
+        return [
+            f"README claims {sorted(claimed)} controls unlock with a dataset, "
+            f"suite skips {actual} without one"
+        ]
+    return []
+
+
 CHECKS = (
     check_test_count,
     check_reason_count,
@@ -174,6 +228,7 @@ CHECKS = (
     check_no_placeholder_urls,
     check_version_is_recorded,
     check_the_blind_spot_is_documented,
+    check_the_skipped_control_count,
 )
 
 
