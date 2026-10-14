@@ -28,6 +28,15 @@ class Answer:
     options_sha256: str
     output_sha256: str
     output_bytes: int
+    #: Why the server stopped.  ``"length"`` means the answer was cut off by
+    #: the token budget, which looks exactly like a model that cannot produce
+    #: the requested shape and is not the same event at all.  Recorded rather
+    #: than inferred, because inferring it from output size is guesswork.
+    done_reason: str | None = None
+
+    @property
+    def truncated(self) -> bool:
+        return self.done_reason == "length"
 
     def receipt(self) -> dict[str, object]:
         return {
@@ -46,6 +55,7 @@ class Answer:
             "options_sha256": self.options_sha256,
             "output_sha256": self.output_sha256,
             "output_bytes": self.output_bytes,
+            "done_reason": self.done_reason,
         }
 
 
@@ -96,6 +106,7 @@ def ask(
     seconds: float = 300,
     num_predict: int = 768,
     think: bool | None = None,
+    schema: dict | None = None,
 ) -> Answer:
     """One deterministic completion.  Raises :class:`ReviewerUnavailable`.
 
@@ -104,6 +115,16 @@ def ask(
     went to the reasoning trace and the answer came back empty.  An empty
     answer is a budget artefact, and reading it as a model failing to quote
     its evidence would be a measurement error.
+
+    ``schema`` constrains decoding to a JSON schema.  It exists because of a
+    measurement, not for convenience: against 26 KB of real source, two of
+    three local models answered in prose and a third invented its own keys, so
+    the gate never reached a single quote.  Constraining the shape removes that
+    failure mode and removes *only* that one -- the first constrained answer
+    observed still carried a fabricated quote.  That is the point.  A harness
+    defect and a fabrication must not be able to produce the same number, and
+    fixing the shape is how you stop crediting the gate for catching bad
+    formatting.
     """
     payload: dict[str, object] = {
         "model": model,
@@ -114,11 +135,21 @@ def ask(
     }
     if think is not None:
         payload["think"] = think
+    if schema is not None:
+        payload["format"] = schema
     pinned = digest(model, endpoint=endpoint)
     reply = _post(endpoint, "/api/generate", payload, seconds)
     text = str(reply.get("response", ""))
+    # The schema belongs in this hash.  A constrained run and an unconstrained
+    # run of the same question are different experiments, and two experiments
+    # that share a receipt cannot be compared -- the mistake already made once
+    # with the system prompt.
     settings = json.dumps(
-        {**payload["options"], "think": payload.get("think")},  # type: ignore[dict-item]
+        {
+            **payload["options"],  # type: ignore[dict-item]
+            "think": payload.get("think"),
+            "format": payload.get("format"),
+        },
         sort_keys=True,
     )
     return Answer(
@@ -130,4 +161,5 @@ def ask(
         options_sha256=hashlib.sha256(settings.encode("utf-8")).hexdigest(),
         output_sha256=hashlib.sha256(text.encode("utf-8")).hexdigest(),
         output_bytes=len(text.encode("utf-8")),
+        done_reason=str(reply.get("done_reason") or "") or None,
     )

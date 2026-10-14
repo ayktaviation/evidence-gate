@@ -54,6 +54,36 @@ SYSTEM = (
 )
 
 
+# The shape the gate requires, expressed so the server can enforce it during
+# decoding instead of the harness hoping for it afterwards.
+#
+# 'requirement' is an enum of the exact requirement strings.  With a free
+# string there, all three models paraphrased and all three were refused with
+# requirement_not_exact_quote -- which is a harness defect wearing a model
+# defect's clothes.  The gate demands an exact requirement; the harness should
+# therefore make an inexact one unrepresentable rather than punish it after the
+# fact.  Nothing about evidence is constrained, because that is the claim under
+# test and constraining it would be rigging the experiment.
+SCHEMA = {
+    "type": "object",
+    "properties": {
+        "findings": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "requirement": {"type": "string", "enum": list(REQUIREMENTS)},
+                    "evidence": {"type": "string"},
+                    "detail": {"type": "string"},
+                },
+                "required": ["requirement", "evidence", "detail"],
+            },
+        }
+    },
+    "required": ["findings"],
+}
+
+
 def _unfenced(text: str) -> str:
     stripped = text.strip()
     if "```" in stripped:
@@ -71,10 +101,17 @@ def main() -> int:
     parser.add_argument("--endpoint", default="http://127.0.0.1:11434")
     parser.add_argument("--seed", type=int, default=20261013)
     parser.add_argument("--think", choices=("on", "off", "default"), default="off")
+    parser.add_argument("--num-predict", type=int, default=4096)
     parser.add_argument(
         "--bounds-from-the-toy",
         action="store_true",
         help="use the fraction-only absence ceiling fitted to the 88-byte file",
+    )
+    parser.add_argument(
+        "--free-form",
+        action="store_true",
+        help="ask for JSON instead of constraining decoding to the schema; "
+        "this is how the 0-of-3 format collapse was measured",
     )
     options = parser.parse_args()
 
@@ -102,8 +139,9 @@ def main() -> int:
             system=SYSTEM,
             endpoint=options.endpoint,
             seed=options.seed,
-            num_predict=1536,
+            num_predict=options.num_predict,
             think={"on": True, "off": False, "default": None}[options.think],
+            schema=None if options.free_form else SCHEMA,
         )
     except ReviewerUnavailable as failure:
         print(f"reviewer unavailable: {failure}", file=sys.stderr)
@@ -114,6 +152,19 @@ def main() -> int:
     try:
         findings = json.loads(_unfenced(answer.text))["findings"]
     except Exception:
+        if answer.truncated:
+            # Not a model failure and not an evidence failure.  The budget ran
+            # out mid-answer, and with constrained decoding the result is
+            # truncated JSON that looks exactly like a model that cannot
+            # comply.  Separated because conflating them is how a harness
+            # produces confident nonsense.
+            print(
+                f"\nresult: TRUNCATED at {answer.output_bytes} bytes "
+                f"(done_reason={answer.done_reason!r}). The token budget ended "
+                "the answer; this says nothing about the model's evidence. "
+                "Raise --num-predict and re-run."
+            )
+            return 3
         print("\nresult: the model did not return the requested JSON shape.")
         return 1
 

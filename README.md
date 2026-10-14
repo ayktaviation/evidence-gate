@@ -24,8 +24,13 @@ except GateError as refusal:
 ## The thing I actually found
 
 I built this expecting to measure how often local models fabricate evidence.
-That is not what dominates. **Most of what looks like fabrication is the gate
-being unable to express the finding.**
+On a small file that is not what dominates: **most of what looked like
+fabrication was the gate being unable to express the finding.**
+
+Then I ran it on 28 KB of real source and the conclusion reversed — two of
+three models quoted code that was never shown to them. Both results are below,
+in the order I found them, because the gap between them is the only part of
+this worth your time: **the toy measurement I trusted was the one that lied.**
 
 Three local models, one 88-byte file, three requirements, identical question
 (`prompt sha256:43199ee4…`), temperature 0, seed 20261013, reasoning traces
@@ -132,11 +137,16 @@ nonsense.
 
 Everything above is nine data points against an 88-byte file. Thresholds fitted
 to a toy are suspect, so I ran the same procedure against two real modules —
-`gate.py` and `ollama.py`, 26,538 characters, four requirements about this
-code's own stated rules (`examples/at_scale.py`).
+`gate.py` and `ollama.py`, four requirements about this code's own stated rules
+(`examples/at_scale.py`).
 
-**No model produced an admissible review. Not one of the three, and none of the
-failures was about evidence.**
+Two numbers, because the subject is this library and the library kept changing
+while I measured it: 26,538 characters for the free-form run below, 28,156 for
+the constrained one. A subject that drifts between runs is a poor subject, and
+it is the second reason this experiment needs an unrelated codebase.
+
+**Asking for JSON in the prompt, no model produced an admissible review, and
+not one of the failures was about evidence:**
 
 | model | output | outcome |
 |---|---|---|
@@ -144,16 +154,42 @@ failures was about evidence.**
 | qwen2.5-coder:14b | 2,950 bytes | prose, no `findings` key — format failure |
 | qwen3:8b | 1,750 bytes | JSON, refused `finding_key_set_mismatch` |
 
-This reframes the whole table above. On a toy, the binding constraint was
-whether a quote could be verified. At 26 KB the binding constraint is whether
-the model answers in the requested shape at all — the gate never gets far
-enough to check a quote. Measuring evidence fidelity on an 88-byte file told me
-about gates. It told me nothing about whether any of this survives contact with
-a real module, and the answer so far is that it does not.
+A gate that reports *format* when you asked it about *evidence* is measuring
+the harness. So I removed the harness defect instead of recording it as a
+finding: Ollama can constrain decoding to a JSON schema, and the requirement
+field becomes an enum of the exact requirement strings, which makes a
+paraphrased requirement unrepresentable rather than punished after the fact.
+Nothing about `evidence` is constrained — that is the claim under test, and
+constraining it would rig the experiment.
 
-The gate does at least separate the two. A format failure is reported as a
-format failure and never as fabrication, which is the distinction that made the
-qwen3 empty-answer trap visible earlier.
+**With the shape no longer in question, the result inverts:**
+
+| model | done_reason | outcome |
+|---|---|---|
+| devstral:24b | `stop` | **refused `evidence_not_in_context`** — 57-byte quote |
+| qwen3:8b | `stop` | **refused `evidence_not_in_context`** — 54-byte quote |
+| qwen2.5-coder:14b | `length` | truncated at 18,301 bytes; not measurable |
+
+Both models that answered cleanly attached a quote that appears **nowhere in
+the 28,156 characters they were shown.** Not a near-miss, not a whitespace
+difference, not an inexpressible absence — invented code attributed to a file.
+
+**This contradicts the headline of this README on anything larger than a toy.**
+At 88 bytes, apparent fabrication was mostly the gate failing to express a
+finding. At 26 KB, with every expressiveness excuse removed and the format
+failure engineered away, fabrication is what is left. The optimistic reading
+was an artefact of a subject small enough to hold in one glance.
+
+So the gate is worth having, and I could not have learned that from the
+measurement I was most proud of.
+
+The third model is recorded as **unmeasured, not as a failure.** `done_reason`
+is read back from the server rather than guessed from output size: at a 4,096
+token budget it was cut off mid-answer, and at 10,000 it ran past the 300-second
+timeout, which means it degenerates into a loop. Truncated JSON under
+constrained decoding looks exactly like a model that cannot comply, and
+counting it as fabrication would be the same error as the qwen3 empty answer
+further down.
 
 **One of those three failures has a confound I should name.** qwen3's rejected
 keys were `index`, `match_count` and `matches` — fields of the receipt schema

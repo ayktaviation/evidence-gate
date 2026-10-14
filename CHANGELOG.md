@@ -50,11 +50,11 @@ Known limits, stated because they bound what the numbers in the README mean:
 - The published measurement is nine data points — three local models, three
   requirements, one 88-byte file. Thresholds were chosen against that file, and
   one of them turned out to be meaningless at the scale of a real module.
-- At 26 KB of real source, none of the three models produced an admissible
-  review, and no failure was about evidence: two wrote prose instead of JSON
-  and one returned the wrong key set. Whether a quote can be verified is simply
-  not the binding constraint at that size. The library is not shown to be
-  useful on a real codebase, and the one attempt says it is not yet.
+- At 28 KB of real source, with decoding constrained to the required schema so
+  that format failure is engineered away rather than counted, two of three
+  models attached quotes that appear nowhere in what they were shown. The
+  optimistic finding above does not survive leaving the toy. The third model
+  looped and is recorded as unmeasured.
 - That scale run reviewed this library with this library, so the model could
   imitate the receipt schema it was reading — and one of the three failures
   looks like exactly that. The experiment needs an unrelated subject.
