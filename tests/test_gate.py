@@ -43,11 +43,23 @@ OBSERVATION = EvidenceSource(
 
 SOURCES = (SOURCE, OBSERVATION)
 
-# The same code as SOURCE, checked out on Windows.  Kept separate because the
+# SOURCE checked out on Windows, plus padding.  Kept separate because the
 # line-ending refusal cannot be provoked against an LF fixture, and a refusal
 # with no fixture is a refusal with no control.
+#
+# The padding is load-bearing, not cosmetic.  SOURCE is 88 bytes, so the
+# two-line quote this row uses is 65% of it, and a quote that large is
+# refused `evidence_covers_whole_source` -- correctly, and in preference to
+# the line-ending reason.  Without the padding this row would be asserting
+# the wrong refusal, which is how the ordering defect reached the suite in
+# the first place.
 WINDOWS_SOURCE = EvidenceSource(
-    name="account.py", kind="source", text=SOURCE.text.replace("\n", "\r\n")
+    name="account.py",
+    kind="source",
+    text=(
+        SOURCE.text + "\n\ndef deposit(account, amount):\n"
+        "    account.balance += amount\n    return account.balance\n"
+    ).replace("\n", "\r\n"),
 )
 
 #: The default call every tabled refusal is made against.  Rows may override
@@ -324,7 +336,11 @@ class NearMissTests(unittest.TestCase):
         windows = EvidenceSource(
             name="w.py",
             kind="source",
-            text="def f():\r\n    if x:\r\n        return compute(x)\r\n    return None\r\n",
+            text=(
+                "def f():\r\n    if x:\r\n        return compute(x)\r\n"
+                "    return None\r\n\r\n\r\ndef g():\r\n    return f()\r\n"
+                "\r\n\r\n# padding, so this span is not also the whole file\r\n"
+            ),
         )
         span = "if x:\n        return compute(x)"
         with self.assertRaises(GateError) as caught:
@@ -344,7 +360,7 @@ class NearMissTests(unittest.TestCase):
         name the refusal carries.
         """
         windows = EvidenceSource(
-            name="w.py", kind="source", text="a = 1\r\nb = 2\r\nc = 3\r\n"
+            name="w.py", kind="source", text="a = 1\r\nb = 2\r\nc = 3\r\nd = 4\r\ne = 5\r\nf = 6\r\n"
         )
         with self.assertRaises(GateError):
             check(
@@ -361,7 +377,7 @@ class NearMissTests(unittest.TestCase):
         traded a false fabrication report for a missed one.
         """
         windows = EvidenceSource(
-            name="w.py", kind="source", text="a = 1\r\nb = 2\r\nc = 3\r\n"
+            name="w.py", kind="source", text="a = 1\r\nb = 2\r\nc = 3\r\nd = 4\r\ne = 5\r\nf = 6\r\n"
         )
         with self.assertRaises(GateError) as caught:
             check(
@@ -374,7 +390,9 @@ class NearMissTests(unittest.TestCase):
     def test_an_lf_source_with_a_crlf_quote_is_the_same_finding(self):
         """The mismatch is symmetric; a model may add endings as well as drop them."""
         unix = EvidenceSource(
-            name="u.py", kind="source", text="a = 1\nb = 2\nc = 3\n"
+            name="u.py",
+            kind="source",
+            text="a = 1\nb = 2\nc = 3\nd = 4\ne = 5\nf = 6\n",
         )
         with self.assertRaises(GateError) as caught:
             check(
@@ -403,6 +421,40 @@ class NearMissTests(unittest.TestCase):
             sources=[windows],
         )
         self.assertEqual(1, receipt["quoted_finding_count"])
+
+    def test_a_whole_file_quote_is_vacuous_before_it_is_a_line_ending(self):
+        """The regression the line-ending reason introduced, now a control.
+
+        Found by probing the fix rather than by reading it.  The new branch
+        sat inside the ``not matches`` arm, so on a CRLF source a whole-file
+        LF quote never reached the whole-source bound and was reported as
+        ``evidence_line_endings_differ`` -- the mild, "normalise your
+        sources" answer -- when the real finding was the vacuous pass that
+        produced this library's first measured bound.
+
+        Both reasons refuse, so nothing was admitted that should not have
+        been.  That is not a defence: this project's entire claim is that a
+        gate reporting the wrong *name* is measuring the harness, and the
+        first version of this fix did exactly that to the bound it most
+        needed to keep.  Asserted in both directions so neither ordering can
+        rot.
+        """
+        body = "a = 1\nb = 2\nc = 3\nd = 4\ne = 5\nf = 6\n"
+        for label, text, evidence in (
+            ("CRLF source, LF quote", body.replace("\n", "\r\n"), body),
+            ("LF source, CRLF quote", body, body.replace("\n", "\r\n")),
+        ):
+            with self.subTest(label):
+                source = EvidenceSource(name="w.py", kind="source", text=text)
+                with self.assertRaises(GateError) as caught:
+                    check(
+                        [{"requirement": "R", "evidence": evidence, "detail": "d"}],
+                        requirements="R",
+                        sources=[source],
+                    )
+                self.assertEqual(
+                    "evidence_covers_whole_source", caught.exception.reason
+                )
 
     def test_a_match_offset_and_an_evidence_length_share_one_unit(self):
         """Positions and sizes must be measurable against each other.

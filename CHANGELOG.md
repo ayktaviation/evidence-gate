@@ -63,6 +63,17 @@ invented code on a CRLF source must still report
 `evidence_not_in_context`, an exactly matching CRLF quote must still be
 admitted, and the mismatch is tested in both directions.
 
+**The first version of this fix had the precedence wrong**, found by probing
+the fix rather than by reading it. The new branch sat inside the "no match
+anywhere" arm, so on a CRLF source a whole-file LF quote never reached
+`evidence_covers_whole_source` and was reported as a line-ending mismatch --
+the mild answer that sends a caller to normalise its sources, when the real
+finding was the vacuous whole-file quote that produced this library's first
+measured bound. Nothing was admitted either way, which is not a defence: the
+name is the product. Vacuity now outranks the platform artefact, asserted in
+both line-ending directions, and the fixtures that provoked the wrong reason
+were padded rather than the bound relaxed.
+
 Unicode normal form remains a refusal and is deliberately *not* given the same
 treatment. A different normal form is a different string with no single
 obviously-intended reading, whereas a line ending is a platform convention for

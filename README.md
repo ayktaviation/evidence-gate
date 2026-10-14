@@ -406,7 +406,7 @@ into the case names it was taken over, so this adds no leak.
 
 ```bash
 cd evidence-gate
-python -m unittest discover -s tests          # 107 tests, no dependencies, no install
+python -m unittest discover -s tests          # 108 tests, no dependencies, no install
 python tools/check_claims.py                  # the README's own numbers, verified
 
 # with a local Ollama running:
@@ -480,6 +480,14 @@ near-miss controls plus a 97-test suite did not catch it, because none of them
 used a CRLF source. **Nothing is admitted that was not admitted before** — comparison
 is still exact and the quote is still refused. Only the name changed, so you
 can tell "normalise your sources" from "distrust your model".
+
+The first version of that fix got the precedence wrong, which is the more
+instructive half. It reported a *whole-file* LF quote against a CRLF source as
+a line-ending mismatch, so the vacuous-quote bound — the first thing this
+project ever measured — was masked on any Windows checkout. Both reasons
+refuse, so nothing was admitted; the name was wrong, and the name is the
+product. Vacuity now outranks the platform artefact and a control asserts it in
+both directions.
 
 `evidence_kind_not_allowed` is the one that is easy to miss. Each source
 carries a caller-chosen `kind`, and `allowed_kinds` restricts what may be

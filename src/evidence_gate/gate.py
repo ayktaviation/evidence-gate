@@ -487,10 +487,40 @@ def check(
             # exact, and nothing here admits a quote it could not find -- but
             # a caller seeing this knows to normalise its sources rather than
             # to distrust its model.
-            if any(
-                _one_newline(evidence) in _one_newline(source.text)
+            unified = [
+                source
                 for source in scoped
-            ):
+                if _one_newline(evidence) in _one_newline(source.text)
+            ]
+            if unified:
+                # Vacuity outranks the platform artefact, and getting this
+                # order wrong once already cost this gate its first measured
+                # bound.  A whole-file quote with the wrong line endings is
+                # still a whole-file quote: reporting it as a line-ending
+                # mismatch would send the caller to normalise its sources
+                # when the real finding is that the quote localises nothing.
+                # Both refuse, so nothing is admitted either way -- but this
+                # library's own argument is that the *name* is the product.
+                fractions = sorted(
+                    {
+                        round(
+                            len(_one_newline(evidence))
+                            / max(len(_one_newline(source.text)), 1),
+                            4,
+                        )
+                        for source in unified
+                    }
+                )
+                if max_source_fraction is not None and all(
+                    fraction > max_source_fraction for fraction in fractions
+                ):
+                    raise GateError(
+                        "evidence_covers_whole_source",
+                        index=index,
+                        max_source_fraction=max_source_fraction,
+                        source_fractions=fractions,
+                        **_field("evidence", evidence),
+                    )
                 raise GateError(
                     "evidence_line_endings_differ",
                     index=index,
