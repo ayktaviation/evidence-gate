@@ -490,6 +490,101 @@ class Verification(unittest.TestCase):
             stats._verify_aggregate(out, extra)
         self.assertIn("not in", str(caught.exception))
 
+    def test_an_aggregate_that_does_not_say_how_it_counted_is_refused(self):
+        """Found by running this verifier against this repository's own file.
+
+        The committed counts are paired -- every arm restricted to the cases
+        all three arms share -- and that is recorded in the aggregate.  The
+        verifier ignored the field and took the pairing from a command-line
+        flag instead, so verifying the real, correct, digest-matching
+        aggregate without the flag reported every arm of every model as off by
+        one case: forty wrong numbers, none of them a wrong number.
+
+        The repair is that the claim decides, not the caller.  An aggregate
+        with no such field cannot be verified at all, because there is no way
+        to know which case set its counts are about, and guessing one would
+        make this check's own answer depend on a guess.
+        """
+        import json
+
+        out, by_model = self.written()
+        data = json.loads(out.read_text(encoding="utf-8"))
+        del data["paired"]
+        out.write_text(json.dumps(data), encoding="utf-8")
+        with self.assertRaises(SystemExit) as caught:
+            stats._verify_aggregate(out, by_model)
+        self.assertIn("paired", str(caught.exception))
+
+
+class Pairing(unittest.TestCase):
+    """Pairing is prepared by one function, as the counts are counted by one.
+
+    ``_pair`` is shared by ``--paired`` and ``--verify`` for the same reason
+    ``_arm_counts`` is: a verifier that prepares its inputs differently from
+    the writer is testing the verifier.
+    """
+
+    def runs(self, **by_arm):
+        """Write one run file per arm, with the case names given."""
+        import json
+        import tempfile
+
+        out = {}
+        for arm, names in by_arm.items():
+            handle = tempfile.NamedTemporaryFile(
+                "w", suffix=".json", delete=False, encoding="utf-8"
+            )
+            json.dump(
+                {
+                    "model": "m",
+                    "renamed": arm == "renamed",
+                    "normalised": arm == "normalised",
+                    "cases": len(names),
+                    "results": [
+                        {
+                            "case": name,
+                            "outcome": "admitted",
+                            "localised": True,
+                            "source_lines": 10,
+                            "miss_lines": None,
+                        }
+                        for name in names
+                    ],
+                },
+                handle,
+            )
+            handle.close()
+            out[arm] = stats.summarise(pathlib.Path(handle.name))
+        return {"m": out}
+
+    def test_pairing_keeps_only_the_cases_every_arm_ran(self):
+        by_model = self.runs(
+            published=["a", "b", "c"],
+            normalised=["a", "b", "d"],
+            renamed=["a", "b", "c"],
+        )
+        lines = stats._pair(by_model)
+        for arm, summary in by_model["m"].items():
+            with self.subTest(arm=arm):
+                self.assertEqual({"a", "b"}, summary["names"])
+                self.assertEqual(2, summary["cases"])
+        self.assertIn("paired on the 2 cases", lines[0])
+
+    def test_pairing_is_a_no_op_when_the_arms_already_agree(self):
+        """The counter-case: pairing that always drops something is a bug."""
+        by_model = self.runs(published=["a", "b"], renamed=["a", "b"])
+        stats._pair(by_model)
+        self.assertEqual({"a", "b"}, by_model["m"]["published"]["names"])
+        self.assertEqual(2, by_model["m"]["renamed"]["cases"])
+
+    def test_arms_with_nothing_in_common_are_refused_not_emptied(self):
+        """Zero paired cases would divide by zero downstream and, worse,
+        would look like a model that got nothing right."""
+        by_model = self.runs(published=["a"], renamed=["b"])
+        with self.assertRaises(SystemExit) as caught:
+            stats._pair(by_model)
+        self.assertIn("no case in common", str(caught.exception))
+
 
 class Binomial(unittest.TestCase):
     def test_a_fair_coin_is_symmetric(self):

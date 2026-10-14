@@ -172,6 +172,31 @@ def _arm_counts(by_model: dict[str, dict[str, dict]]) -> dict:
     }
 
 
+def _pair(by_model: dict[str, dict[str, dict]]) -> list[str]:
+    """Restrict every arm of a model to the cases all its arms share.
+
+    One function, used by ``--paired`` and by ``--verify``, for the same
+    reason ``_arm_counts`` is shared: a verifier that prepares its inputs
+    differently from the writer tests the verifier.
+    """
+    lines = []
+    for model, arms in by_model.items():
+        shared = set.intersection(*(a["names"] for a in arms.values()))
+        dropped = max(len(a["names"]) for a in arms.values()) - len(shared)
+        if not shared:
+            raise SystemExit(
+                f"{model}: its arms have no case in common, so there is "
+                "nothing to compare pairwise"
+            )
+        for name, summary in list(arms.items()):
+            arms[name] = summarise(summary["source"], shared)
+        lines.append(
+            f"{model}: paired on the {len(shared)} cases common to all "
+            f"{len(arms)} arms, {dropped} dropped"
+        )
+    return lines
+
+
 def _verify_aggregate(
     path: pathlib.Path, by_model: dict[str, dict[str, dict]]
 ) -> list[str]:
@@ -187,8 +212,25 @@ def _verify_aggregate(
     that was not supplied, and that is as much a failure as a wrong count --
     silently verifying the subset you happen to hold is how a check passes
     while the claim is false.
+
+    Whether the arms were paired is read from the committed file, not from the
+    command line, and that was a defect here rather than a design.  Verifying
+    this repository's own committed counts without ``--paired`` reported every
+    arm of every model as off by one case: forty wrong numbers whose actual
+    cause was a flag the caller was expected to guess, while the file itself
+    recorded the answer in a field the verifier ignored.  A check that fails
+    for a reason it will not name teaches the person running it to try flags
+    until it passes, which is the opposite of the point.  So the pairing comes
+    from the claim being checked, and a caller who contradicts it is refused
+    rather than quietly overridden.
     """
     committed = json.loads(path.read_text(encoding="utf-8"))
+    if "paired" not in committed:
+        raise SystemExit(
+            f"{path}: does not record whether its arms were paired, so there "
+            "is no way to know which counts it is claiming. Re-write it with "
+            "a tool that records the field."
+        )
     recomputed = _arm_counts(by_model)
     problems: list[str] = []
 
@@ -494,21 +536,34 @@ def main() -> int:
             )
         arms[summary["arm"]] = summary
 
-    if options.paired:
-        for model, arms in by_model.items():
-            shared = set.intersection(*(a["names"] for a in arms.values()))
-            dropped = max(len(a["names"]) for a in arms.values()) - len(shared)
-            if not shared:
-                raise SystemExit(
-                    f"{model}: its arms have no case in common, so there is "
-                    "nothing to compare pairwise"
-                )
-            for name, summary in list(arms.items()):
-                arms[name] = summarise(summary["source"], shared)
-            print(
-                f"{model}: paired on the {len(shared)} cases common to all "
-                f"{len(arms)} arms, {dropped} dropped"
+    paired = options.paired
+    if options.verify:
+        # The committed file says which counts it is claiming, so it decides.
+        # Letting the command line decide meant a correct aggregate verified
+        # against the right bytes could report forty wrong numbers because a
+        # flag was missing.
+        claimed = json.loads(options.verify.read_text(encoding="utf-8")).get("paired")
+        if claimed is None:
+            raise SystemExit(
+                f"{options.verify}: does not record whether its arms were "
+                "paired, so there is nothing to verify it against"
             )
+        if options.paired and not claimed:
+            raise SystemExit(
+                f"--paired was given but {options.verify.name} records unpaired "
+                "counts: those are different claims about different case sets, "
+                "and running one against the other proves nothing either way"
+            )
+        paired = bool(claimed)
+        if paired and not options.paired:
+            print(
+                f"{options.verify.name} records paired counts, so the arms are "
+                "paired to match it"
+            )
+
+    if paired:
+        for line in _pair(by_model):
+            print(line)
 
     if options.verify:
         for line in _verify_aggregate(options.verify, by_model):

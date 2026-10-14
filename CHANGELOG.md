@@ -75,6 +75,27 @@ is malformed, or is shared by two arms.
 The counts themselves were regenerated from the same run files and are
 unchanged; only the schema name, the note and the digests differ.
 
+**The first version of that verifier could not verify this repository's own
+counts**, found by running it rather than by reading it. The committed arms are
+paired down to the 35 cases common to all three — the arms are not the same 36,
+because one case survives reformatting differently — and the aggregate records
+that in a `paired` field the verifier ignored, taking the pairing from a
+command-line flag instead. Run without the flag against the real, correct,
+digest-matching file, it reported every arm of every model as off by one case:
+forty wrong numbers, none of them a wrong number.
+
+Nothing false was ever published and no count changed, which is not a defence.
+A check that fails for a reason it will not name trains whoever runs it to try
+flags until it passes, and a verifier used that way is worse than no verifier,
+because it still prints the word "verified". The claim now decides how it is
+checked: pairing is read from the committed file, a contradicting flag is
+refused rather than quietly overridden, and an aggregate that does not record
+how it counted is refused outright, since guessing would make the check's
+answer depend on a guess. Pairing moved into one function shared by both paths,
+for the same reason the counting already was: a verifier that prepares its
+inputs differently from the writer is testing the verifier. Four controls,
+including the counter-case that pairing identical arms drops nothing.
+
 **Breaking: adds a refusal reason**, `evidence_line_endings_differ`, which is a
 minor version under the policy above. Code that exhaustively handled every
 reason may now fall through, so the bump is required rather than courteous.

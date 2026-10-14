@@ -25,7 +25,7 @@ Copy `src/evidence_gate/` into your project, or `pip install -e .`. Python 3.10+
 standard library only. The floor is enforced to agree across the README, the
 packaging metadata and the CI matrix, because it did not: this file claimed
 3.11 while `requires-python` said 3.10, and nothing checked. The suite has been
-run here on 3.9.6, 3.12.13 and 3.14.5 — all 140 tests, no skips beyond the 8
+run here on 3.9.6, 3.12.13 and 3.14.5 — all 144 tests, no skips beyond the 8
 that need a model — so 3.10 and 3.11 sit between two passing versions rather
 than having been executed. That is a bracket, not a measurement, and the CI
 matrix that would close it has not run yet.
@@ -398,7 +398,7 @@ pair — it establishes *which bytes are being claimed*. Anyone holding the runs
 can run
 
 ```bash
-python tools/significance.py --paired run-*.json --verify measurements/quixbugs-2026-10-13.json
+python tools/significance.py run-*.json --verify measurements/quixbugs-2026-10-13.json
 ```
 
 and get a non-zero exit if the published counts do not follow from them. That
@@ -408,11 +408,25 @@ malformed, or is shared by two arms, because provenance that nothing defends
 decays back into decoration. A digest is content-free and cannot be reversed
 into the case names it was taken over, so this adds no leak.
 
+That command used to need `--paired`, and finding out why is the only reason
+this paragraph is trustworthy. These arms are not the same 36 cases — one case
+survives reformatting differently — so the committed counts are paired down to
+the 35 common to all three, and the aggregate records that. The verifier took
+the pairing from the command line instead, so running it against this
+repository's own correct, digest-matching counts without the flag reported
+every arm of every model as off by one: forty wrong numbers, not one of them a
+wrong number. Nothing was published falsely, which is not a defence — a check
+that fails for a reason it will not name teaches whoever runs it to try flags
+until it passes, and that is a worse failure than no check. The claim now
+decides how it is checked: pairing is read from the file, a contradicting flag
+is refused rather than silently obeyed, and an aggregate that does not record
+how it counted cannot be verified at all.
+
 ## Try it in 60 seconds
 
 ```bash
 cd evidence-gate
-python -m unittest discover -s tests          # 140 tests, no dependencies, no install
+python -m unittest discover -s tests          # 144 tests, no dependencies, no install
 python tools/check_claims.py                  # the README's own numbers, verified
 
 # with a local Ollama running:
