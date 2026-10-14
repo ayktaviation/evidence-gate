@@ -190,6 +190,9 @@ class ArmIdentification(unittest.TestCase):
             "cases": 1,
             "results": [
                 {
+                    # Named, because --paired identifies cases by this field
+                    # and a fixture without it stopped resembling a run file.
+                    "case": "only",
                     "outcome": "admitted",
                     "localised": True,
                     "source_lines": 10,
@@ -226,6 +229,49 @@ class ArmIdentification(unittest.TestCase):
 
         self.assertNotIn("normalised", json.loads(path.read_text()))
         self.assertEqual("published", stats.summarise(path)["arm"])
+
+    def test_restricting_to_shared_cases_changes_the_counts_it_should(self):
+        """``--paired`` exists because the arms are not the same programs.
+
+        Reformatting through ast.unparse moves where the lines fall, so the
+        single-line-defect filter keeps ``powerset`` in the reformatted arms
+        and drops it from the published one, and does the reverse with
+        ``shortest_path_length_test``.  Each arm has 36 cases and 35 are
+        common to all three, so an unpaired comparison is between slightly
+        different sets of programs.
+        """
+        import json
+        import tempfile
+
+        body = {
+            "model": "m",
+            "renamed": False,
+            "cases": 3,
+            "results": [
+                {"case": name, "outcome": "admitted", "localised": hit,
+                 "source_lines": 10, "miss_lines": None}
+                for name, hit in (("a", True), ("b", True), ("c", False))
+            ],
+        }
+        handle = tempfile.NamedTemporaryFile(
+            "w", suffix=".json", delete=False, encoding="utf-8"
+        )
+        json.dump(body, handle)
+        handle.close()
+        path = pathlib.Path(handle.name)
+
+        everything = stats.summarise(path)
+        self.assertEqual(3, everything["cases"])
+        self.assertEqual(2, everything["localised"])
+        self.assertEqual({"a", "b", "c"}, everything["names"])
+
+        restricted = stats.summarise(path, {"a", "c"})
+        self.assertEqual(2, restricted["cases"])
+        self.assertEqual(1, restricted["localised"])
+        self.assertEqual({"a", "c"}, restricted["names"])
+
+        # A name that is not in the file must not invent a case.
+        self.assertEqual(1, stats.summarise(path, {"a", "absent"})["cases"])
 
     def test_renamed_wins_if_a_run_somehow_claims_to_be_both(self):
         """The CLI refuses to produce such a run, so this is about reading one.

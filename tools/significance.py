@@ -132,9 +132,26 @@ def binomial_at_most(successes: int, trials: int, rate: float) -> float:
     )
 
 
-def summarise(path: pathlib.Path) -> dict:
+def summarise(path: pathlib.Path, keep: set[str] | None = None) -> dict:
+    """Summarise one run.  ``keep`` restricts it to a set of case names.
+
+    The restriction exists because the arms are not the same 36 cases.
+    Reformatting through ``ast.unparse`` changes where the lines fall, so the
+    single-line-defect filter admits ``powerset`` in the reformatted arms and
+    drops it from the published one, and does the reverse with
+    ``shortest_path_length_test``.  Each arm has 36 cases and only 35 are
+    common to all three.
+
+    One case in 36 is a small thing and an unmatched comparison is a
+    different claim from a matched one, so ``--paired`` restricts every arm of
+    a model to the cases all of its arms share.  No re-running is needed: the
+    per-case rows are in the run files already.
+    """
     run = json.loads(path.read_text(encoding="utf-8"))
-    admitted = [r for r in run["results"] if r["outcome"] == "admitted"]
+    results = run["results"]
+    if keep is not None:
+        results = [r for r in results if r["case"] in keep]
+    admitted = [r for r in results if r["outcome"] == "admitted"]
     if not admitted:
         raise SystemExit(f"{path}: no admitted findings to test")
     localised = [r for r in admitted if r["localised"]]
@@ -154,10 +171,12 @@ def summarise(path: pathlib.Path) -> dict:
         arm = "published"
     return {
         "path": path.name,
+        "source": path,
+        "names": {r["case"] for r in results},
         "model": run["model"],
         "renamed": run["renamed"],
         "arm": arm,
-        "cases": run["cases"],
+        "cases": len(results),
         "admitted": len(admitted),
         "localised": len(localised),
         "adjacent": sum(1 for r in near if r["miss_lines"] <= 1),
@@ -176,7 +195,7 @@ def summarise(path: pathlib.Path) -> dict:
         # should believe.  The counts are small and the printout says so.
         "refused": collections.Counter(
             r.get("reason") or r["outcome"]
-            for r in run["results"]
+            for r in results
             if r["outcome"] != "admitted"
         ),
     }
@@ -286,6 +305,12 @@ def main() -> int:
         "files; the arm and model of each is read from the file itself."
     )
     parser.add_argument("runs", nargs="+", type=pathlib.Path)
+    parser.add_argument(
+        "--paired",
+        action="store_true",
+        help="restrict every arm of a model to the cases all its arms share, "
+        "so the comparison is between the same programs",
+    )
     options = parser.parse_args()
 
     by_model: dict[str, dict[str, dict]] = {}
@@ -300,6 +325,22 @@ def main() -> int:
                 "same arm is not what any test here does"
             )
         arms[summary["arm"]] = summary
+
+    if options.paired:
+        for model, arms in by_model.items():
+            shared = set.intersection(*(a["names"] for a in arms.values()))
+            dropped = max(len(a["names"]) for a in arms.values()) - len(shared)
+            if not shared:
+                raise SystemExit(
+                    f"{model}: its arms have no case in common, so there is "
+                    "nothing to compare pairwise"
+                )
+            for name, summary in list(arms.items()):
+                arms[name] = summarise(summary["source"], shared)
+            print(
+                f"{model}: paired on the {len(shared)} cases common to all "
+                f"{len(arms)} arms, {dropped} dropped"
+            )
 
     strata = []
     for index, (model, arms) in enumerate(by_model.items()):
