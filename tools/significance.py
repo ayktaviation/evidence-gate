@@ -32,6 +32,7 @@ model is guessing.
 from __future__ import annotations
 
 import argparse
+import collections
 import json
 import pathlib
 from math import comb, erfc, sqrt
@@ -166,6 +167,18 @@ def summarise(path: pathlib.Path) -> dict:
         # the averages.
         "chance": sum(1 / n for n in lines if n) / len(lines),
         "mean_lines": sum(lines) / len(lines),
+        # Why the gate refused, not just how often.  Added because the counts
+        # turned out to differ in kind between arms and not merely in size:
+        # fabricated quotes appear in the published arm and the shift in the
+        # renamed arm is towards quotes too short to admit.  That was first
+        # computed in a throwaway shell command, which is the habit this file
+        # exists to replace -- a number nobody can re-run is a number nobody
+        # should believe.  The counts are small and the printout says so.
+        "refused": collections.Counter(
+            r.get("reason") or r["outcome"]
+            for r in run["results"]
+            if r["outcome"] != "admitted"
+        ),
     }
 
 
@@ -211,11 +224,15 @@ def report(arms: dict[str, dict]) -> dict:
     for name in present:
         arm = arms[name]
         rate = arm["localised"] / arm["admitted"]
+        refused = ", ".join(
+            f"{reason} {count}" for reason, count in sorted(arm["refused"].items())
+        )
         print(
             f"{name:11s} admitted {arm['admitted']}/{arm['cases']}  "
             f"localised {arm['localised']}/{arm['admitted']} = {rate:.3f}  "
             f"chance {arm['chance']:.3f}  "
             f"ratio {rate / arm['chance']:.2f}x"
+            f"{'  refused: ' + refused if refused else ''}"
         )
 
     print()
@@ -228,6 +245,22 @@ def report(arms: dict[str, dict]) -> dict:
             f"P(<={arm['localised']}) = {below:.4f}"
             f"{'   above chance' if above < 0.05 else ''}"
             f"{'   indistinguishable from chance' if above >= 0.05 and below >= 0.05 else ''}"
+        )
+
+    # No test is run on the refusal counts.  Across the arms measured so far
+    # they differ in kind -- fabricated quotes in the published arm, quotes
+    # too short to admit in the renamed one -- which is a more interesting
+    # claim than any of the localisation numbers and rests on single-digit
+    # counts.  Printed so it can be followed up, left untested so it cannot
+    # be cited.
+    totals = collections.Counter()
+    for name in present:
+        totals.update(arms[name]["refused"])
+    if totals:
+        print()
+        print(
+            "  refusals are too few to test and are reported as counts only: "
+            + ", ".join(f"{k} {v}" for k, v in sorted(totals.items()))
         )
 
     print()
