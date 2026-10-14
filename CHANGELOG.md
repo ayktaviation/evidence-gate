@@ -73,6 +73,12 @@ Known limits, stated because they bound what the numbers in the README mean:
   defects, three local models, paired on 35 cases), the gate admits 94–100% of
   findings while 11–49% of admitted findings name the right line. Admissibility
   is not correctness, and nothing in this library claims to measure the latter.
+- The per-arm counts from that run are committed as
+  `measurements/quixbugs-2026-10-13.json` and the README's p-values are
+  recomputed from them by `tools/check_claims.py`. The run files themselves are
+  not published: they are content-free but name the holdout cases. Counts
+  suffice to re-run every test and do not suffice to ask a new question, so
+  re-analysis still requires the runs.
 - In that run, all three models fall to chance when identifiers are rewritten
   and are indistinguishable from quoting a line at random. Reformatting through
   the same code path changes nothing (two models return identical counts), so

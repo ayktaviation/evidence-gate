@@ -221,6 +221,112 @@ def check_the_skipped_control_count(report: list[str]) -> list[str]:
     return []
 
 
+def check_the_measurement_arithmetic(report: list[str]) -> list[str]:
+    """Recompute the README's statistics from the committed counts.
+
+    Every other number in this README is checked against the code, and the
+    statistics were the exception: they were computed once from run files that
+    are deliberately not in this repository and then typed into prose.  A
+    reader could not check them and neither could I, which is the position
+    this project argues against.
+
+    So the counts the tests consumed are committed (no case names -- the
+    holdout is not publishable) and the arithmetic is redone here on every
+    push.  This checks the claims, not just the digits: that formatting shows
+    no effect, that renaming does, that every renamed arm sits at the chance
+    floor, and that the floor is *higher* in the reformatted arms -- the
+    asymmetry that runs in favour of the conclusion and would be the first
+    thing to quietly rot.
+    """
+    aggregate = ROOT / "measurements" / "quixbugs-2026-10-13.json"
+    if not aggregate.exists():
+        return ["the committed measurement counts are gone"]
+
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(
+        "significance", ROOT / "tools" / "significance.py"
+    )
+    stats = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(stats)
+
+    import json
+
+    data = json.loads(aggregate.read_text(encoding="utf-8"))
+    arms = data["arms"]
+    readme = _readme()
+    problems = []
+
+    def table(first, second):
+        return (
+            first["localised"],
+            first["admitted"] - first["localised"],
+            second["localised"],
+            second["admitted"] - second["localised"],
+        )
+
+    for model, by_arm in arms.items():
+        for arm, counts in by_arm.items():
+            fraction = f"{counts['localised']}/{counts['admitted']}"
+            if fraction not in readme:
+                problems.append(
+                    f"README does not state {fraction} for {model} {arm}"
+                )
+
+        formatting = stats.fisher_two_tailed(
+            *table(by_arm["published"], by_arm["normalised"])
+        )
+        if formatting <= 0.05:
+            problems.append(
+                f"{model}: reformatting now shows an effect (p = {formatting:.4f}); "
+                "the README says it does not"
+            )
+        # The renamed arm must stay indistinguishable from quoting at random.
+        renamed = by_arm["renamed"]
+        floor = stats.binomial_at_least(
+            renamed["localised"], renamed["admitted"], renamed["chance"]
+        )
+        if floor <= 0.05:
+            problems.append(
+                f"{model}: the renamed arm now beats chance (p = {floor:.4f}); "
+                "the README says it does not"
+            )
+        if renamed["chance"] <= by_arm["published"]["chance"]:
+            problems.append(
+                f"{model}: the renamed chance floor is no longer the higher "
+                "one, so the README's asymmetry argument no longer holds"
+            )
+
+    pooled_formatting = stats.mantel_haenszel(
+        [table(a["published"], a["normalised"]) for a in arms.values()]
+    )[1]
+    pooled_names = stats.mantel_haenszel(
+        [table(a["normalised"], a["renamed"]) for a in arms.values()]
+    )[1]
+    if pooled_formatting <= 0.05:
+        problems.append(
+            f"stratified formatting effect is now significant (p = {pooled_formatting:.4f})"
+        )
+    if pooled_names >= 0.001:
+        problems.append(
+            f"stratified naming effect is no longer significant (p = {pooled_names:.4f})"
+        )
+
+    # The scope of the claim, not just its direction.  A measurement quoted
+    # without its sample size is the overclaim this section exists to avoid.
+    if len(arms) < 3:
+        problems.append(f"the README describes three models, the counts have {len(arms)}")
+    paired = {counts["cases"] for by_arm in arms.values() for counts in by_arm.values()}
+    if paired != {35} or "35 paired cases" not in readme:
+        problems.append(f"README and counts disagree on the paired case count: {paired}")
+
+    report.append(
+        f"measurement: {len(arms)} models, formatting p = {pooled_formatting:.4f} NS, "
+        f"names p = {pooled_names:.6f}, all renamed arms at chance"
+    )
+    return problems
+
+
 CHECKS = (
     check_test_count,
     check_reason_count,
@@ -229,6 +335,7 @@ CHECKS = (
     check_version_is_recorded,
     check_the_blind_spot_is_documented,
     check_the_skipped_control_count,
+    check_the_measurement_arithmetic,
 )
 
 

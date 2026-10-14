@@ -305,6 +305,7 @@ class ArmIdentification(unittest.TestCase):
         # A name that is not in the file must not invent a case.
         self.assertEqual(1, stats.summarise(path, {"a", "absent"})["cases"])
 
+
     def test_renamed_wins_if_a_run_somehow_claims_to_be_both(self):
         """The CLI refuses to produce such a run, so this is about reading one.
 
@@ -315,6 +316,87 @@ class ArmIdentification(unittest.TestCase):
         """
         summary = stats.summarise(self.run_file(renamed=True, normalised=True))
         self.assertEqual("renamed", summary["arm"])
+
+
+class Aggregate(unittest.TestCase):
+    """The committed counts must carry the statistics and not the case list.
+
+    Two requirements pulling opposite ways.  The README's statistics have to
+    stay recomputable without the run files, which are not published; and the
+    holdout case names must never be published, because they were spent once
+    and naming them is what makes them unreusable for anyone else.  Counts
+    satisfy the first and omit the second, so the omission is asserted rather
+    than assumed.
+    """
+
+    def aggregate_of(self, **counts):
+        import argparse
+        import json
+        import tempfile
+
+        summary = {
+            "cases": 2,
+            "admitted": 2,
+            "localised": 1,
+            "adjacent": 1,
+            "scattered": 0,
+            "chance": 0.1,
+            "mean_lines": 10.0,
+            "refused": {},
+            **counts,
+        }
+        with tempfile.NamedTemporaryFile(
+            "w", suffix=".json", delete=False, encoding="utf-8"
+        ) as handle:
+            out = pathlib.Path(handle.name)
+        stats._write_aggregate(
+            argparse.Namespace(aggregate=out, paired=True),
+            {"m": {"published": summary}},
+        )
+        return out.read_text(encoding="utf-8"), json.loads(out.read_text())
+
+    def test_no_case_name_reaches_the_committed_counts(self):
+        """The whole point of publishing counts instead of rows."""
+        text, data = self.aggregate_of()
+        for name in ("bitcount", "levenshtein", "sieve", "powerset", "gcd"):
+            self.assertNotIn(name, text, f"{name!r} leaked into the aggregate")
+        # Structural rather than by keyword: every value under "arms" is a
+        # number, so no case name can be carried there whatever it is called.
+        # Checking for the substring "case" instead would only have caught the
+        # names I thought to list, and would trip over the schema's own prose.
+        for model, by_arm in data["arms"].items():
+            for arm, counts in by_arm.items():
+                for key, value in counts.items():
+                    if key == "refused":
+                        continue
+                    self.assertIsInstance(
+                        value, (int, float), f"{model}/{arm}/{key} is not a count"
+                    )
+
+    def test_the_counts_are_enough_to_rerun_every_test(self):
+        """Fisher needs a 2x2, the binomial needs a rate: both are present."""
+        _, data = self.aggregate_of(localised=1, admitted=2, chance=0.25)
+        arm = data["arms"]["m"]["published"]
+        for field in ("admitted", "localised", "near_misses", "within_one_line", "chance"):
+            self.assertIn(field, arm)
+        self.assertIsNotNone(
+            stats.fisher_two_tailed(
+                arm["localised"], arm["admitted"] - arm["localised"], 0, 2
+            )
+        )
+        self.assertIsNotNone(
+            stats.binomial_at_least(arm["localised"], arm["admitted"], arm["chance"])
+        )
+
+    def test_the_near_miss_denominator_is_measurable_misses_only(self):
+        """Not every miss has a distance: an absence finding has no line.
+
+        So the denominator is adjacent plus scattered, and taking it to be
+        every non-localised case would silently inflate it.
+        """
+        _, data = self.aggregate_of(adjacent=3, scattered=4)
+        self.assertEqual(7, data["arms"]["m"]["published"]["near_misses"])
+        self.assertEqual(3, data["arms"]["m"]["published"]["within_one_line"])
 
 
 class Binomial(unittest.TestCase):

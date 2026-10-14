@@ -351,11 +351,21 @@ The run files behind this section stay outside this repository. They are
 content-free — hashes, byte counts, line numbers, `done_reason` — but they name
 the 36 holdout cases, and those were spent once and are not reusable.
 
+**The counts are committed, so the arithmetic above is checked rather than
+quoted.** `measurements/quixbugs-2026-10-13.json` carries the per-arm numbers
+every test here consumed and no case names, and `tools/check_claims.py`
+recomputes the p-values from it on every push: that formatting shows no effect,
+that renaming does, that each renamed arm still sits at its chance floor, and
+that the floor is higher in the reformatted arms. If any of those stops being
+true the build fails. Counts are enough to re-run the tests and not enough to
+ask a new question of the data — re-analysis needs the run files, which is the
+honest cost of not publishing them.
+
 ## Try it in 60 seconds
 
 ```bash
 cd evidence-gate
-python -m unittest discover -s tests          # 93 tests, no dependencies, no install
+python -m unittest discover -s tests          # 96 tests, no dependencies, no install
 python tools/check_claims.py                  # the README's own numbers, verified
 
 # with a local Ollama running:

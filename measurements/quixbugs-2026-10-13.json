@@ -1,0 +1,114 @@
+{
+  "arms": {
+    "devstral:24b": {
+      "normalised": {
+        "admitted": 35,
+        "cases": 35,
+        "chance": 0.134711,
+        "localised": 11,
+        "mean_lines": 8.9429,
+        "near_misses": 24,
+        "refused": {},
+        "within_one_line": 9
+      },
+      "published": {
+        "admitted": 33,
+        "cases": 35,
+        "chance": 0.112166,
+        "localised": 8,
+        "mean_lines": 10.5455,
+        "near_misses": 25,
+        "refused": {
+          "evidence_not_in_context": 2
+        },
+        "within_one_line": 9
+      },
+      "renamed": {
+        "admitted": 35,
+        "cases": 35,
+        "chance": 0.134711,
+        "localised": 4,
+        "mean_lines": 8.9429,
+        "near_misses": 31,
+        "refused": {},
+        "within_one_line": 1
+      }
+    },
+    "phi4:14b": {
+      "normalised": {
+        "admitted": 35,
+        "cases": 35,
+        "chance": 0.134711,
+        "localised": 17,
+        "mean_lines": 8.9429,
+        "near_misses": 18,
+        "refused": {},
+        "within_one_line": 4
+      },
+      "published": {
+        "admitted": 35,
+        "cases": 35,
+        "chance": 0.110336,
+        "localised": 17,
+        "mean_lines": 10.6571,
+        "near_misses": 18,
+        "refused": {},
+        "within_one_line": 4
+      },
+      "renamed": {
+        "admitted": 34,
+        "cases": 35,
+        "chance": 0.135999,
+        "localised": 5,
+        "mean_lines": 8.8824,
+        "near_misses": 29,
+        "refused": {
+          "evidence_too_short": 1
+        },
+        "within_one_line": 0
+      }
+    },
+    "qwen2.5-coder:14b": {
+      "normalised": {
+        "admitted": 33,
+        "cases": 35,
+        "chance": 0.135299,
+        "localised": 14,
+        "mean_lines": 8.9394,
+        "near_misses": 19,
+        "refused": {
+          "evidence_not_in_context": 2
+        },
+        "within_one_line": 7
+      },
+      "published": {
+        "admitted": 33,
+        "cases": 35,
+        "chance": 0.112902,
+        "localised": 14,
+        "mean_lines": 10.3636,
+        "near_misses": 19,
+        "refused": {
+          "evidence_not_in_context": 2
+        },
+        "within_one_line": 8
+      },
+      "renamed": {
+        "admitted": 34,
+        "cases": 35,
+        "chance": 0.136222,
+        "localised": 4,
+        "mean_lines": 8.8529,
+        "near_misses": 30,
+        "refused": {
+          "evidence_too_short": 1
+        },
+        "within_one_line": 6
+      }
+    }
+  },
+  "dataset": "QuixBugs single-line Python defects",
+  "note": "Counts only, by design: the run files name the holdout cases and are not published. Sufficient to recompute every statistic in the README, insufficient to ask a new question.",
+  "paired": true,
+  "schema": "evidence-gate-localisation-aggregate-v1"
+}

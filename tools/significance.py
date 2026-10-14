@@ -132,6 +132,67 @@ def binomial_at_most(successes: int, trials: int, rate: float) -> float:
     )
 
 
+def _write_aggregate(options, by_model: dict[str, dict[str, dict]]) -> None:
+    """Record the counts the tests consumed, with no case names in them.
+
+    The README quotes statistics computed from run files that are deliberately
+    not in this repository: they are content-free, but they name the 36 holdout
+    cases, and those were spent once.  That left the strongest section of the
+    README resting on files a reader cannot see and a `/tmp` sweep could
+    delete -- a quoted number, which is the thing this project argues is worth
+    less than an absent one.
+
+    Every test here consumes only counts.  Fisher needs a 2x2, the binomial
+    needs successes, trials and a rate, and CMH needs one 2x2 per stratum.  So
+    the counts are publishable even though the rows they came from are not, and
+    committing them makes the README's arithmetic checkable by anyone without
+    republishing a case list or re-running a single model.
+
+    What this does NOT preserve: per-case rows, so no new question can be asked
+    of this data afterwards.  Re-analysis still needs the run files.  This is a
+    record of what was tested, not a substitute for the measurement.
+    """
+    arms = {
+        model: {
+            arm: {
+                "cases": summary["cases"],
+                "admitted": summary["admitted"],
+                "localised": summary["localised"],
+                # The near-miss denominator is the misses whose distance could
+                # be measured at all, which is adjacent plus scattered -- not
+                # every miss, since an absence finding has no line to miss by.
+                "near_misses": summary["adjacent"] + summary["scattered"],
+                "within_one_line": summary["adjacent"],
+                "chance": round(summary["chance"], 6),
+                "mean_lines": round(summary["mean_lines"], 4),
+                "refused": dict(summary["refused"]),
+            }
+            for arm, summary in sorted(model_arms.items())
+        }
+        for model, model_arms in sorted(by_model.items())
+    }
+    options.aggregate.write_text(
+        json.dumps(
+            {
+                "schema": "evidence-gate-localisation-aggregate-v1",
+                "dataset": "QuixBugs single-line Python defects",
+                "paired": bool(options.paired),
+                "note": (
+                    "Counts only, by design: the run files name the holdout "
+                    "cases and are not published. Sufficient to recompute "
+                    "every statistic in the README, insufficient to ask a new "
+                    "question."
+                ),
+                "arms": arms,
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+
 def summarise(path: pathlib.Path, keep: set[str] | None = None) -> dict:
     """Summarise one run.  ``keep`` restricts it to a set of case names.
 
@@ -322,6 +383,12 @@ def main() -> int:
         help="restrict every arm of a model to the cases all its arms share, "
         "so the comparison is between the same programs",
     )
+    parser.add_argument(
+        "--aggregate",
+        type=pathlib.Path,
+        help="write the per-arm counts this tool tested, with no case names, "
+        "so the README's statistics stay recomputable without the run files",
+    )
     options = parser.parse_args()
 
     by_model: dict[str, dict[str, dict]] = {}
@@ -352,6 +419,10 @@ def main() -> int:
                 f"{model}: paired on the {len(shared)} cases common to all "
                 f"{len(arms)} arms, {dropped} dropped"
             )
+
+    if options.aggregate:
+        _write_aggregate(options, by_model)
+        print(f"wrote aggregate {options.aggregate}")
 
     strata = []
     for index, (model, arms) in enumerate(by_model.items()):
