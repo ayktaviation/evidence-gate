@@ -34,7 +34,7 @@ from __future__ import annotations
 import argparse
 import json
 import pathlib
-from math import comb
+from math import comb, erfc, sqrt
 
 
 def fisher_two_tailed(a: int, b: int, c: int, d: int) -> float:
@@ -63,6 +63,58 @@ def fisher_two_tailed(a: int, b: int, c: int, d: int) -> float:
         if candidate <= observed + 1e-12:
             accumulated += candidate
     return min(accumulated, 1.0)
+
+
+def mantel_haenszel(tables: list[tuple[int, int, int, int]]) -> tuple[float, float]:
+    """Cochran-Mantel-Haenszel across strata.  Returns ``(statistic, p)``.
+
+    One model's 36 cases cannot settle a question at these effect sizes, so
+    the obvious move is to pool several models and gain sample size.  Pooling
+    the counts directly is wrong, and not subtly wrong: if the models differ
+    in baseline localisation -- they do -- the pooled table can point the
+    opposite way from every model in it.  That is Simpson's paradox, and
+    ``test_pooling_can_reverse_what_every_stratum_says`` constructs a case
+    where it happens with counts small enough to check by hand.
+
+    Stratifying by model is the fix.  Each model contributes its own
+    expectation and variance, and the sum is compared against a chi-squared
+    with one degree of freedom.
+
+    Two honest limits, because this function is weaker than the other two
+    here and the difference matters:
+
+    1. It is **asymptotic**, unlike ``fisher_two_tailed``.  On this
+       repository's own headline table the exact test gives p = 0.2129 and
+       this gives 0.1713.  It is anti-conservative at these counts -- it
+       flatters the claim -- so it must never be quoted as the headline.  It
+       is here to answer "does the drop survive when several models are
+       considered together", not to replace the exact test on one of them.
+    2. It tests a *common* direction across strata.  If two models genuinely
+       move opposite ways it will report no effect, which is the correct
+       answer to the question asked and the wrong answer to "did anything
+       happen".  Read the per-model rows as well; they are printed first for
+       that reason.
+    """
+    numerator = 0.0
+    variance = 0.0
+    for a, b, c, d in tables:
+        total = a + b + c + d
+        # A stratum of one observation has no variance to contribute and
+        # would divide by zero below.  Skipped rather than special-cased into
+        # a fake contribution.
+        if total < 2:
+            continue
+        numerator += a - (a + b) * (a + c) / total
+        variance += (
+            (a + b) * (c + d) * (a + c) * (b + d) / (total * total * (total - 1))
+        )
+    if variance == 0:
+        return 0.0, 1.0
+    statistic = numerator * numerator / variance
+    # The exact upper tail of chi-squared with one degree of freedom is
+    # erfc(sqrt(x/2)).  No approximation and no table lookup: the only
+    # approximation in this function is the asymptotic one above.
+    return statistic, erfc(sqrt(statistic / 2))
 
 
 def binomial_at_least(successes: int, trials: int, rate: float) -> float:
@@ -105,26 +157,8 @@ def summarise(path: pathlib.Path) -> dict:
     }
 
 
-def main() -> int:
-    parser = argparse.ArgumentParser()
-    parser.add_argument("published", type=pathlib.Path)
-    parser.add_argument("renamed", type=pathlib.Path)
-    options = parser.parse_args()
-
-    first = summarise(options.published)
-    second = summarise(options.renamed)
-    if first["renamed"] or not second["renamed"]:
-        raise SystemExit(
-            "arguments are (published-names run, renamed run); the recorded "
-            "'renamed' flags say otherwise, and comparing the wrong pair "
-            "would produce a confident number about nothing"
-        )
-    if first["model"] != second["model"]:
-        raise SystemExit(
-            f"different models ({first['model']} vs {second['model']}): the "
-            "contamination control only means anything within one model"
-        )
-
+def report(first: dict, second: dict) -> dict:
+    """Print one model's comparison and return its 2x2 tables for pooling."""
     for arm in (first, second):
         rate = arm["localised"] / arm["admitted"]
         print(
@@ -174,6 +208,88 @@ def main() -> int:
         f"Fisher p = {clustering:.5f}"
         f"{'   significant' if clustering < 0.05 else '   NOT SIGNIFICANT'}"
     )
+    return {
+        "model": first["model"],
+        "localisation": (
+            first["localised"],
+            first["admitted"] - first["localised"],
+            second["localised"],
+            second["admitted"] - second["localised"],
+        ),
+        "clustering": (
+            first["adjacent"],
+            first["scattered"],
+            second["adjacent"],
+            second["scattered"],
+        ),
+    }
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(
+        description="Test one or more (published, renamed) run pairs."
+    )
+    parser.add_argument(
+        "runs",
+        nargs="+",
+        type=pathlib.Path,
+        help="published and renamed run JSON, in that order, one pair per model",
+    )
+    options = parser.parse_args()
+
+    if len(options.runs) % 2:
+        raise SystemExit(
+            f"{len(options.runs)} files given: runs come in (published, renamed) "
+            "pairs, and an odd count means one arm is missing -- which pair is "
+            "incomplete is not something this tool should guess at"
+        )
+
+    strata = []
+    for published, renamed in zip(options.runs[::2], options.runs[1::2]):
+        first, second = summarise(published), summarise(renamed)
+        if first["renamed"] or not second["renamed"]:
+            raise SystemExit(
+                f"{published.name} and {renamed.name}: arguments are "
+                "(published-names run, renamed run); the recorded 'renamed' "
+                "flags say otherwise, and comparing the wrong pair would "
+                "produce a confident number about nothing"
+            )
+        if first["model"] != second["model"]:
+            raise SystemExit(
+                f"different models ({first['model']} vs {second['model']}): the "
+                "contamination control only means anything within one model"
+            )
+        if strata:
+            print()
+            print("-" * 72)
+        print(f"model: {first['model']}")
+        strata.append(report(first, second))
+
+    if len(strata) < 2:
+        return 0
+
+    models = [s["model"] for s in strata]
+    if len(set(models)) != len(models):
+        raise SystemExit(
+            "the same model appears in more than one pair: stratifying by "
+            "model only controls for the model if each stratum is a different "
+            "one, and repeating a stratum would count the same cases twice"
+        )
+
+    print()
+    print("=" * 72)
+    print(f"stratified across {len(strata)} models: {', '.join(models)}")
+    print(
+        "asymptotic, and anti-conservative at these counts -- read the exact "
+        "per-model tests above as the headline"
+    )
+    for label, key in (("localisation", "localisation"), ("near misses", "clustering")):
+        statistic, pooled = mantel_haenszel([s[key] for s in strata])
+        print(
+            f"{label}, published vs renamed, stratified by model: "
+            f"CMH chi2 = {statistic:.4f}  p = {pooled:.4f}"
+            f"{'   significant' if pooled < 0.05 else '   NOT SIGNIFICANT'}"
+        )
     return 0
 
 

@@ -76,6 +76,101 @@ class FisherExact(unittest.TestCase):
         self.assertLess(stats.fisher_two_tailed(9, 17, 1, 31), 0.01)
 
 
+class MantelHaenszel(unittest.TestCase):
+    """Controls for the stratified test, which exists to pool models safely.
+
+    Pinned against an identity rather than a remembered constant.  For a
+    single stratum the CMH statistic equals ``(n-1)/n`` times the Pearson
+    chi-squared statistic, and Pearson is four terms of ``(o-e)^2/e`` that a
+    reader can compute on paper.  Checking against a number I recalled from a
+    textbook would be checking my memory, not the code.
+    """
+
+    @staticmethod
+    def pearson(a, b, c, d):
+        total = a + b + c + d
+        rows, cols = (a + b, c + d), (a + c, b + d)
+        expected = [rows[i] * cols[j] / total for i in (0, 1) for j in (0, 1)]
+        return sum((o - e) ** 2 / e for o, e in zip((a, b, c, d), expected))
+
+    def test_one_stratum_reduces_to_the_corrected_chi_squared(self):
+        for table in [(8, 26, 4, 32), (9, 17, 1, 31), (3, 1, 1, 3), (12, 3, 10, 4)]:
+            with self.subTest(table=table):
+                total = sum(table)
+                statistic, _ = stats.mantel_haenszel([table])
+                self.assertAlmostEqual(
+                    (total - 1) / total * self.pearson(*table),
+                    statistic,
+                    places=9,
+                )
+
+    def test_pooling_can_reverse_what_every_stratum_says(self):
+        """Simpson's paradox, with counts small enough to verify by hand.
+
+        In stratum one 1/2 = 0.500 against 4/7 = 0.571, and in stratum two
+        11/13 = 0.846 against 6/7 = 0.857: row one is lower in both.  Add the
+        tables and row one becomes 12/15 = 0.800 against 10/14 = 0.714 --
+        higher.  This is why the models are stratified rather than summed,
+        and the test asserts the arithmetic rather than describing it.
+        """
+        first, second = (1, 1, 4, 3), (11, 2, 6, 1)
+        self.assertLess(1 / 2, 4 / 7)
+        self.assertLess(11 / 13, 6 / 7)
+
+        pooled = tuple(x + y for x, y in zip(first, second))
+        self.assertEqual((12, 3, 10, 4), pooled)
+        self.assertGreater(12 / 15, 10 / 14)
+
+        # The sign of the CMH numerator is the direction it reports.  Summing
+        # the tables first flips it; stratifying keeps the direction every
+        # stratum actually shows.
+        self.assertLess(stats.mantel_haenszel([first, second])[0], float("inf"))
+        stratified = sum(
+            a - (a + b) * (a + c) / (a + b + c + d) for a, b, c, d in (first, second)
+        )
+        naive = pooled[0] - (pooled[0] + pooled[1]) * (pooled[0] + pooled[2]) / sum(
+            pooled
+        )
+        self.assertLess(stratified, 0, "stratified must follow the strata: row 1 lower")
+        self.assertGreater(naive, 0, "the pooled table points the other way")
+
+    def test_repeating_a_stratum_strengthens_the_same_finding(self):
+        """Two models that agree must be more persuasive than one.
+
+        Not a tautology: a stratified test that mishandled the variance sum
+        could easily make agreement look weaker.
+        """
+        table = (8, 26, 4, 32)
+        _, one = stats.mantel_haenszel([table])
+        _, three = stats.mantel_haenszel([table] * 3)
+        self.assertLess(three, one)
+
+    def test_strata_with_no_difference_report_no_difference(self):
+        _, p = stats.mantel_haenszel([(5, 5, 5, 5), (7, 7, 7, 7)])
+        self.assertAlmostEqual(1.0, p, places=9)
+
+    def test_a_degenerate_stratum_does_not_divide_by_zero(self):
+        """One case, or none, must contribute nothing rather than crash."""
+        self.assertEqual((0.0, 1.0), stats.mantel_haenszel([]))
+        self.assertEqual((0.0, 1.0), stats.mantel_haenszel([(1, 0, 0, 0)]))
+        _, with_junk = stats.mantel_haenszel([(8, 26, 4, 32), (0, 0, 0, 0)])
+        _, without = stats.mantel_haenszel([(8, 26, 4, 32)])
+        self.assertAlmostEqual(without, with_junk, places=12)
+
+    def test_the_approximation_is_anti_conservative_here(self):
+        """Pinned because it is the reason this test is not the headline.
+
+        At n = 70 the asymptotic test reports a smaller p than the exact one
+        on the same table. If that ever reverses the README's choice of which
+        number to quote should be revisited, so the direction is asserted
+        rather than left as a remark in a docstring.
+        """
+        table = (8, 26, 4, 32)
+        _, approximate = stats.mantel_haenszel([table])
+        self.assertLess(approximate, stats.fisher_two_tailed(*table))
+        self.assertGreater(approximate, 0.05, "still not significant either way")
+
+
 class Binomial(unittest.TestCase):
     def test_a_fair_coin_is_symmetric(self):
         """P(X >= k) must equal P(X <= n - k) when p = 0.5.
