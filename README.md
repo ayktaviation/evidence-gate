@@ -425,7 +425,7 @@ how it counted cannot be verified at all.
 ## Try it in 60 seconds
 
 ```bash
-cd evidence-gate
+git clone https://github.com/ayktaviation/evidence-gate && cd evidence-gate
 python -m unittest discover -s tests          # 148 tests, no dependencies, no install
 python tools/check_claims.py                  # the README's own numbers, verified
 

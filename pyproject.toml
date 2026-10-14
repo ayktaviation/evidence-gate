@@ -19,10 +19,13 @@ classifiers = [
 ]
 dependencies = []
 
-# No [project.urls] yet.  A placeholder URL in published metadata is a dead
-# link that outlives the mistake, and this project's whole argument is that an
-# unchecked claim is worse than an absent one.  Added when a canonical home
-# exists.
+# Added once a canonical home existed, and not before: a placeholder URL in
+# published metadata is a dead link that outlives the mistake, and this
+# project's whole argument is that an unchecked claim is worse than an absent
+# one.  `tools/check_claims.py` fails the build on the usual placeholders.
+[project.urls]
+Source = "https://github.com/ayktaviation/evidence-gate"
+Changelog = "https://github.com/ayktaviation/evidence-gate/blob/master/CHANGELOG.md"
 
 [tool.setuptools.packages.find]
 where = ["src"]
