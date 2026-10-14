@@ -279,6 +279,32 @@ def _unfenced(text: str) -> str:
     return stripped[start : end + 1] if 0 <= start < end else stripped
 
 
+def _miss_distance(receipt: dict, case: dict) -> int | None:
+    """Lines between the nearest admitted quote and the real defect.
+
+    The first run of this harness reported 8 of 34 and gave no way to ask why
+    the other 26 missed.  A model that quotes the line immediately above the
+    defect is doing something different from one that quotes a random line
+    eleven lines away, and a measurement that cannot separate them is a
+    headline without a finding underneath it.
+
+    Returned in lines rather than characters because lines are what the model
+    was asked for, and in signed-free absolute form because direction is not
+    the interesting part.  ``None`` when nothing was quoted at all.
+
+    This stays content-free: offsets and line counts, never the quoted text.
+    """
+    defect_line_index = case["source"][: case["defect_start"]].count("\n")
+    distances = []
+    for row in receipt["findings"]:
+        if not row["quoted"]:
+            continue
+        for match in row["matches"]:
+            quoted_line_index = case["source"][: match["offset"]].count("\n")
+            distances.append(abs(quoted_line_index - defect_line_index))
+    return min(distances) if distances else None
+
+
 def _localised(receipt: dict, case: dict) -> bool:
     """Did any admitted quote overlap the line the dataset says is wrong?
 
@@ -403,6 +429,13 @@ def main() -> int:
                             distinct_evidence=receipt["distinct_evidence_count"],
                             reused_evidence=receipt["reused_evidence_count"],
                             localised=_localised(receipt, case),
+                            miss_lines=_miss_distance(receipt, case),
+                            source_lines=case["source"].count("\n"),
+                            evidence_chars=[
+                                row["evidence_chars"]
+                                for row in receipt["findings"]
+                                if row["quoted"]
+                            ],
                         )
 
         mark = {
@@ -438,6 +471,29 @@ def main() -> int:
             "report: evidence that exists exactly where the model said it "
             "does, attached to the wrong line."
         )
+        missed = [r for r in admitted if not r["localised"]]
+        near = [r for r in missed if r["miss_lines"] is not None]
+        if near:
+            # A miss of one line is a different event from a miss of eleven.
+            # Without this split the headline says only "mostly wrong", which
+            # is a mood rather than a measurement.
+            adjacent = sum(1 for r in near if r["miss_lines"] <= 1)
+            distances = sorted(r["miss_lines"] for r in near)
+            median = distances[len(distances) // 2]
+            print(
+                f"\nof the {len(missed)} admitted misses: {adjacent} landed "
+                f"within one line of the defect, median miss {median} lines, "
+                f"worst {distances[-1]} lines, in sources of "
+                f"{min(r['source_lines'] for r in near)}-"
+                f"{max(r['source_lines'] for r in near)} lines"
+            )
+            if adjacent:
+                print(
+                    "a one-line miss is not a random guess and not a correct "
+                    "answer; it is the gate admitting a quote that is near "
+                    "the defect, which is exactly the judgement this library "
+                    "refuses to make on your behalf"
+                )
     if quoted_admitted:
         reuse = sum(r["reused_evidence"] for r in quoted_admitted)
         print(f"evidence reuse across admitted findings: {reuse}")

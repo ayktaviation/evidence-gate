@@ -154,6 +154,61 @@ class AgainstTheRealDataset(unittest.TestCase):
                 }
                 self.assertFalse(harness._localised(elsewhere, case))
 
+    def test_a_miss_distance_of_zero_means_the_same_line(self):
+        """The diagnostic must agree with the headline it explains.
+
+        If a quote on the defect span could report a non-zero line distance,
+        the two numbers would disagree and a reader would have no way to tell
+        which one to trust.
+        """
+        for case in harness.cases(self.dataset, False)[:10]:
+            with self.subTest(case=case["name"]):
+                on_target = {
+                    "findings": [
+                        {
+                            "quoted": True,
+                            "evidence_chars": len(case["defect_line"]),
+                            "matches": [{"offset": case["defect_start"]}],
+                        }
+                    ]
+                }
+                self.assertTrue(harness._localised(on_target, case))
+                self.assertEqual(0, harness._miss_distance(on_target, case))
+
+    def test_a_miss_distance_counts_lines_not_characters(self):
+        """Measured in the unit the model was asked to answer in.
+
+        A quote placed exactly one newline earlier than the defect must
+        report 1, whatever the length of the lines involved.
+        """
+        case = next(
+            c
+            for c in harness.cases(self.dataset, False)
+            if c["source"][: c["defect_start"]].count("\n") >= 2
+        )
+        previous_newline = case["source"].rindex("\n", 0, case["defect_start"] - 1)
+        receipt = {
+            "findings": [
+                {
+                    "quoted": True,
+                    "evidence_chars": 3,
+                    "matches": [{"offset": previous_newline + 1}],
+                }
+            ]
+        }
+        self.assertEqual(1, harness._miss_distance(receipt, case))
+        self.assertFalse(harness._localised(receipt, case))
+
+    def test_a_miss_distance_is_none_when_nothing_was_quoted(self):
+        """Absence has no position, so it must not report a distance of zero.
+
+        Zero would read as a perfect hit in the aggregate, turning a finding
+        that pointed nowhere into the best possible result.
+        """
+        case = harness.cases(self.dataset, False)[0]
+        receipt = {"findings": [{"quoted": False, "matches": []}]}
+        self.assertIsNone(harness._miss_distance(receipt, case))
+
     def test_an_absence_finding_never_counts_as_localisation(self):
         """Absence carries no position, so it cannot overlap anything.
 
