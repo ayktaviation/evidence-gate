@@ -261,24 +261,35 @@ def check_the_blind_spot_is_documented(report: list[str]) -> list[str]:
     advertising it is to delete a README section while leaving every test
     green.  The other checks in this file would not notice.
 
-    So the section, the two receipt fields that make the weakness countable,
-    and the adversarial test file that proves it are all required to coexist.
+    So the section, the receipt fields that make the weakness countable, and
+    the adversarial test file that proves it are all required to coexist.
     Removing any one of them fails the build, which is the point: a limitation
     that can be deleted without consequence is a limitation that will be.
+
+    ``ambiguous_localisation_count`` joined the list for the same reason as
+    the other two.  A quote occurring twice is admissible and the gate may not
+    refuse it, so the only honest response is to count it where a caller
+    looks.
     """
     readme = _readme()
     problems = []
     if "## The attack this gate does not stop" not in readme:
         problems.append("README no longer documents the gate's known blind spot")
-    for field in ("distinct_evidence_count", "reused_evidence_count"):
+    countable = (
+        "distinct_evidence_count",
+        "reused_evidence_count",
+        "ambiguous_localisation_count",
+    )
+    for field in countable:
         if field not in readme:
             problems.append(f"README does not mention the {field} receipt field")
         if field not in RECEIPT_FIELDS:
             problems.append(f"the receipt no longer reports {field}")
     if not (ROOT / "tests" / "test_compliant_parasite.py").exists():
         problems.append("the adversarial control for the blind spot is gone")
+    reported = len(RECEIPT_FIELDS & set(countable))
     report.append(
-        f"blind spot: documented, {len(RECEIPT_FIELDS & {'distinct_evidence_count', 'reused_evidence_count'})}/2 fields reported"
+        f"blind spot: documented, {reported}/{len(countable)} fields reported"
     )
     return problems
 

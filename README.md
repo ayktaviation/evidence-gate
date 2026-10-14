@@ -25,7 +25,7 @@ Copy `src/evidence_gate/` into your project, or `pip install -e .`. Python 3.10+
 standard library only. The floor is enforced to agree across the README, the
 packaging metadata and the CI matrix, because it did not: this file claimed
 3.11 while `requires-python` said 3.10, and nothing checked. The suite has been
-run here on 3.9.6, 3.12.13 and 3.14.5 — all 108 tests, no skips beyond the 8
+run here on 3.9.6, 3.12.13 and 3.14.5 — all 111 tests, no skips beyond the 8
 that need a model — so 3.10 and 3.11 sit between two passing versions rather
 than having been executed. That is a bracket, not a measurement, and the CI
 matrix that would close it has not run yet.
@@ -412,7 +412,7 @@ into the case names it was taken over, so this adds no leak.
 
 ```bash
 cd evidence-gate
-python -m unittest discover -s tests          # 108 tests, no dependencies, no install
+python -m unittest discover -s tests          # 111 tests, no dependencies, no install
 python tools/check_claims.py                  # the README's own numbers, verified
 
 # with a local Ollama running:
@@ -586,6 +586,17 @@ One distinct span under four findings is not proof of a worthless answer, and
 the receipt does not claim it is. It is arithmetic, not judgment — which is
 exactly why the gate is allowed to report it. A caller who sees those numbers
 knows to look; a caller who never gets them cannot.
+
+A second version of the same problem gets the same treatment.
+`ambiguous_localisation_count` counts admitted quotes that occur **more than
+once** in the text they were checked against. A span appearing twice is a real
+span — present, exact, inside every bound — it just does not say which
+occurrence the finding is about, and the gate cannot know. Choosing one would
+be inventing a location, which is the failure this whole library exists to
+catch. The per-finding `match_count` always carried this, so nothing was
+hidden; it was absent from the *summary*, and the summary is what gets read. A
+receipt announcing "1 located finding" about a quote that points at two places
+was reporting less than it knew.
 
 The same hole exists on the absence side and cannot be closed by any bound.
 `absent:zqx` is three characters, passes the floor, and is genuinely missing

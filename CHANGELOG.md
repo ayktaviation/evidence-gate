@@ -21,6 +21,21 @@ caller is expected to branch on those names, so:
 
 ## 0.2.0
 
+**Not breaking, additive:** the receipt gains
+`ambiguous_localisation_count`, the number of admitted quotes that occur more
+than once in the text they were checked against.
+
+Third instance of the same principle as `distinct_evidence_count` and
+`reused_evidence_count`: a quote appearing twice is present, exact and inside
+every bound, so the gate may not refuse it -- picking which occurrence was
+meant would be inventing a location, the failure this library exists to catch.
+The per-finding `match_count` always carried the fact, so nothing was hidden;
+it was absent from the summary, and the summary is what a caller reads. A
+receipt announcing one located finding about a quote pointing at two places
+reported less than it knew. Admissibility is unchanged and a control asserts
+that, since a receipt field that quietly starts refusing things is a
+tightening in disguise.
+
 **Not breaking, in the same release:** the committed measurement counts now
 carry the SHA-256 of the run file each arm was computed from
 (`evidence-gate-localisation-aggregate-v2`), and `significance.py --verify`

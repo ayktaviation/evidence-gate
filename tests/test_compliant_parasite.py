@@ -165,6 +165,94 @@ class TheGateAdmitsTrueButIrrelevantEvidence(unittest.TestCase):
         self.assertEqual(0, receipt["reused_evidence_count"])
 
 
+class TheGateAdmitsAQuoteThatPointsAtTwoPlaces(unittest.TestCase):
+    """A second thing the gate may not refuse, and so must count.
+
+    A span that occurs twice is a real span: present, exact, inside every
+    bound.  It simply does not say which occurrence the finding is about, and
+    the gate cannot know -- picking one would be inventing a location, which
+    is the failure this library exists to catch.
+
+    ``match_count`` was always on the finding, so the information was never
+    missing.  It was missing from the *summary*, and the summary is what a
+    caller reads: a receipt whose headline said "1 located finding" while that
+    finding pointed at two places was reporting less than it knew.
+    """
+
+    DUPLICATED = EvidenceSource(
+        name="pair.py",
+        kind="source",
+        text=(
+            "def a(x):\n"
+            "    return compute(x)\n"
+            "\n"
+            "def b(x):\n"
+            "    return compute(x)\n"
+            "# padding, to keep the quote well under max_source_fraction\n"
+        ),
+    )
+
+    def test_an_ambiguous_quote_is_admitted_and_counted(self):
+        receipt = check(
+            [
+                {
+                    "requirement": "Results must be cached.",
+                    "evidence": "return compute(x)",
+                    "detail": "Recomputes every call.",
+                }
+            ],
+            requirements="Results must be cached.",
+            sources=[self.DUPLICATED],
+        )
+
+        # Admissibility is unchanged.  This field exists to describe, not to
+        # refuse; if adding it had started refusing anything, the change would
+        # have been a tightening dressed up as a receipt field.
+        self.assertTrue(receipt["accepted"])
+        self.assertEqual(1, receipt["quoted_finding_count"])
+        self.assertEqual(2, receipt["findings"][0]["match_count"])
+        self.assertEqual(1, receipt["ambiguous_localisation_count"])
+
+    def test_an_unambiguous_quote_counts_zero(self):
+        """The counter-case.  A number that is never zero measures nothing."""
+        receipt = check(
+            [
+                {
+                    "requirement": "Imports must be minimal.",
+                    "evidence": IRRELEVANT_BUT_REAL,
+                    "detail": "Unused import.",
+                }
+            ],
+            requirements="Imports must be minimal.",
+            sources=[SOURCE],
+        )
+
+        self.assertEqual(1, receipt["quoted_finding_count"])
+        self.assertEqual(0, receipt["ambiguous_localisation_count"])
+
+    def test_an_absence_finding_is_not_counted_as_ambiguous(self):
+        """Absence carries a pattern, not a location, so it cannot be
+        ambiguous about one.  Folding it in would let a reader add two
+        different things together, which is the mistake every count in this
+        receipt is split up to prevent."""
+        receipt = check(
+            [
+                {
+                    "requirement": "Every withdrawal must be written to an audit log.",
+                    "evidence": "absent:log(",
+                    "detail": "No logging call.",
+                }
+            ],
+            requirements="Every withdrawal must be written to an audit log.",
+            sources=[SOURCE],
+            absence_prefix="absent:",
+        )
+
+        self.assertEqual(1, receipt["verified_absence_count"])
+        self.assertEqual(0, receipt["quoted_finding_count"])
+        self.assertEqual(0, receipt["ambiguous_localisation_count"])
+
+
 class TheGateAdmitsATriviallyAbsentPattern(unittest.TestCase):
     def test_a_short_nonsense_pattern_is_a_verified_absence(self):
         """The floor bounds length, and length is not informativeness.

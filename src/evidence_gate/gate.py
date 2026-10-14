@@ -581,6 +581,22 @@ def check(
         ),
         "reused_evidence_count": sum(1 for row in rows if row["quoted"])
         - len({row["evidence_sha256"] for row in rows if row["quoted"]}),
+        # The same argument as the two fields above, applied to a second thing
+        # the gate may not refuse.  A quote that occurs twice in the file is a
+        # real quote: it is present, exact, and within every bound.  It just
+        # does not say *which* occurrence the finding is about, and the gate
+        # cannot know -- choosing one would be inventing a location, which is
+        # the failure this whole library exists to catch.
+        #
+        # ``match_count`` was already on each finding, so the information was
+        # never missing; it was only absent from the summary, which is where a
+        # caller looks.  A receipt whose headline reads "1 located finding"
+        # while that finding points at two places is reporting less than it
+        # knows.  Admissibility is unchanged: nothing new is refused, and this
+        # field is additive, which the versioning policy calls non-breaking.
+        "ambiguous_localisation_count": sum(
+            1 for row in rows if row["quoted"] and row.get("match_count", 0) > 1
+        ),
         "unverified_absence_count": sum(
             1 for row in rows if not row["quoted"] and not row["verified_absence"]
         ),
