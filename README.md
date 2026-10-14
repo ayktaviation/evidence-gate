@@ -21,8 +21,14 @@ except GateError as refusal:
     print(refusal.diagnostic)    # hashes and byte counts, never the text
 ```
 
-Copy `src/evidence_gate/` into your project, or `pip install -e .`. Python
-3.11+, standard library only.
+Copy `src/evidence_gate/` into your project, or `pip install -e .`. Python 3.10+,
+standard library only. The floor is enforced to agree across the README, the
+packaging metadata and the CI matrix, because it did not: this file claimed
+3.11 while `requires-python` said 3.10, and nothing checked. The suite has been
+run here on 3.9.6, 3.12.13 and 3.14.5 — all 108 tests, no skips beyond the 8
+that need a model — so 3.10 and 3.11 sit between two passing versions rather
+than having been executed. That is a bracket, not a measurement, and the CI
+matrix that would close it has not run yet.
 
 **Where to go next**, because most of what follows is a lab notebook rather
 than a manual:

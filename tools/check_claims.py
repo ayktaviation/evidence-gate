@@ -138,6 +138,62 @@ def check_version_is_recorded(report: list[str]) -> list[str]:
     return problems
 
 
+def check_the_python_floor_agrees(report: list[str]) -> list[str]:
+    """The README, the packaging metadata and the CI matrix name one floor.
+
+    Added because they did not.  The README said "Python 3.11+" while
+    ``requires-python`` said ``>=3.10`` and the CI matrix started at 3.10 --
+    three statements of the same fact, two of them wrong, none of them
+    checked.  Nothing broke: both numbers were conservative, since the suite
+    in fact passes on 3.9.  That is the uninteresting part.  The interesting
+    part is that this repository's entire argument is that an unchecked claim
+    drifts, and the claim about its own supported versions had drifted while
+    every test stayed green.
+
+    A floor is also the one claim here that cannot be fully settled on this
+    machine: 3.10 and 3.11 are not installed, and installing them is not
+    something this project does on a user's behalf.  So the check enforces
+    agreement, and the README states separately which interpreters were
+    actually run.  Agreement is verifiable; support is bracketed and said to
+    be bracketed.
+    """
+    pyproject = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
+    readme = _readme()
+    workflow = ROOT / ".github" / "workflows" / "checks.yml"
+
+    declared = re.search(r'requires-python\s*=\s*">=\s*(\d+\.\d+)"', pyproject)
+    if not declared:
+        return ["pyproject.toml no longer declares a requires-python floor"]
+    floor = declared.group(1)
+
+    problems = []
+    stated = re.search(r"Python\s+(\d+\.\d+)\+", readme)
+    if not stated or stated.group(1) != floor:
+        # Spelled out rather than nested in the f-string: reusing the outer
+        # quote inside a replacement field is PEP 701, which means 3.12, and
+        # this check would then crash on the floor it exists to police.
+        said = "Python " + stated.group(1) + "+" if stated else "nothing"
+        problems.append(
+            f"pyproject requires-python >={floor}, README says {said}"
+        )
+    if workflow.exists():
+        matrix = re.findall(r'"(\d+\.\d+)"', workflow.read_text(encoding="utf-8"))
+        tested = sorted({m for m in matrix if m.startswith("3.")}, key=_as_version)
+        if tested and tested[0] != floor:
+            problems.append(
+                f"CI matrix starts at {tested[0]}, requires-python says {floor}; "
+                "a version the package claims is a version the suite must run on"
+            )
+        report.append(f"python floor: {floor}, CI matrix {tested}")
+    else:
+        problems.append("the CI workflow is gone, so the matrix claim is unchecked")
+    return problems
+
+
+def _as_version(text: str) -> tuple[int, ...]:
+    return tuple(int(part) for part in text.split("."))
+
+
 def check_the_blind_spot_is_documented(report: list[str]) -> list[str]:
     """The gate's unclosable hole stays described, and stays demonstrated.
 
@@ -351,6 +407,7 @@ CHECKS = (
     check_every_reason_is_documented,
     check_no_placeholder_urls,
     check_version_is_recorded,
+    check_the_python_floor_agrees,
     check_the_blind_spot_is_documented,
     check_the_skipped_control_count,
     check_the_measurement_arithmetic,
