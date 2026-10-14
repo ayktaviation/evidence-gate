@@ -19,6 +19,38 @@ caller is expected to branch on those names, so:
   library's history was paid for by counting the widened case separately in the
   receipt, so no reader can mistake it for a verified quote.
 
+## 0.2.0
+
+**Breaking: adds a refusal reason**, `evidence_line_endings_differ`, which is a
+minor version under the policy above. Code that exhaustively handled every
+reason may now fall through, so the bump is required rather than courteous.
+
+Found by probing the library rather than by reading it. A quote that matches
+the source apart from its line endings was refused `evidence_not_in_context` --
+the same reason as a quote of code that was never shown. A repository checked
+out on Windows has CRLF endings and a model that reflows its answer emits LF,
+so every multi-line quote came back as apparent fabrication, caused entirely by
+the checkout.
+
+That is this project's own central argument turned against it: the README
+spends several paragraphs on why a gate reporting *format* when you asked about
+*evidence* is measuring the harness, and this gate did exactly that on any CRLF
+source. The suite had four near-miss controls -- collapsed whitespace, changed
+case, reflowed indentation, a different Unicode normal form -- and none for
+line endings, which is why it survived to be found by probing.
+
+**Comparison is unchanged and nothing new is admitted.** The quote is still
+refused; only the name of the refusal changed, so a caller can tell "normalise
+your sources" from "distrust your model". Three controls guard the separation:
+invented code on a CRLF source must still report
+`evidence_not_in_context`, an exactly matching CRLF quote must still be
+admitted, and the mismatch is tested in both directions.
+
+Unicode normal form remains a refusal and is deliberately *not* given the same
+treatment. A different normal form is a different string with no single
+obviously-intended reading, whereas a line ending is a platform convention for
+the same text.
+
 ## 0.1.0
 
 First release. Exact-substring verification of model-supplied evidence, with

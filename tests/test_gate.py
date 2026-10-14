@@ -43,6 +43,17 @@ OBSERVATION = EvidenceSource(
 
 SOURCES = (SOURCE, OBSERVATION)
 
+# The same code as SOURCE, checked out on Windows.  Kept separate because the
+# line-ending refusal cannot be provoked against an LF fixture, and a refusal
+# with no fixture is a refusal with no control.
+WINDOWS_SOURCE = EvidenceSource(
+    name="account.py", kind="source", text=SOURCE.text.replace("\n", "\r\n")
+)
+
+#: The default call every tabled refusal is made against.  Rows may override
+#: any part of it, which is what lets one row supply a CRLF source.
+CALL = {"requirements": REQUIREMENTS, "sources": SOURCES}
+
 
 def finding(**overrides: object) -> dict:
     base = {
@@ -107,6 +118,18 @@ REFUSALS: tuple[tuple[str, list, dict], ...] = (
         "evidence_not_in_context",
         [finding(evidence="if account.balance < 0: raise ValueError")],
         {},
+    ),
+    (
+        # The quote is in the source apart from its line endings: the model
+        # read the code and the checkout supplied the mismatch.  Still
+        # refused, but no longer called fabrication.
+        "evidence_line_endings_differ",
+        [
+            finding(
+                evidence="def withdraw(account, amount):\n    account.balance -= amount"
+            )
+        ],
+        {"sources": (WINDOWS_SOURCE,)},
     ),
     (
         "absence_pattern_too_short",
@@ -185,12 +208,11 @@ class RefusalTests(unittest.TestCase):
         for reason, findings, kwargs in REFUSALS:
             with self.subTest(reason=reason):
                 with self.assertRaises(GateError) as caught:
-                    check(
-                        findings,
-                        requirements=REQUIREMENTS,
-                        sources=SOURCES,
-                        **kwargs,
-                    )
+                    # kwargs may override ``sources``: the line-ending refusal
+                    # cannot be provoked against the shared LF fixture, and a
+                    # reason with no row in this table is a reason with no
+                    # control.
+                    check(findings, **{**CALL, **kwargs})
                 self.assertEqual(reason, caught.exception.reason)
                 self.assertEqual(reason, caught.exception.diagnostic["reason"])
 
@@ -219,6 +241,7 @@ class RefusalTests(unittest.TestCase):
                 "absence_pattern_too_short",
                 "evidence_covers_whole_source",
                 "evidence_kind_not_allowed",
+                "evidence_line_endings_differ",
                 "evidence_not_in_context",
                 "evidence_too_long",
                 "evidence_too_short",
@@ -236,12 +259,7 @@ class RefusalTests(unittest.TestCase):
         for reason, findings, kwargs in REFUSALS:
             with self.subTest(reason=reason):
                 with self.assertRaises(GateError) as caught:
-                    check(
-                        findings,
-                        requirements=REQUIREMENTS,
-                        sources=SOURCES,
-                        **kwargs,
-                    )
+                    check(findings, **{**CALL, **kwargs})
                 serialised = json.dumps(caught.exception.diagnostic, sort_keys=True)
                 for item in findings:
                     if not isinstance(item, dict):
@@ -288,6 +306,103 @@ class NearMissTests(unittest.TestCase):
             "evidence_not_in_context",
             self._refused("def withdraw(account, amount):\naccount.balance -= amount"),
         )
+
+    def test_a_line_ending_mismatch_is_not_reported_as_fabrication(self):
+        """The defect this reason was added for, stated as a control.
+
+        A repository checked out on Windows has CRLF endings; a model that
+        reflows its answer emits LF; every multi-line quote then came back as
+        ``evidence_not_in_context`` -- the same reason as code that was never
+        shown.  A user's first encounter with this library on Windows was a
+        screen of apparent fabrication, caused by the checkout.
+
+        That is the error this project exists to argue against, committed by
+        this project: reporting a platform artefact as a claim about a model.
+        The suite had four near-miss controls and none for line endings, which
+        is why it survived to be found by probing rather than by testing.
+        """
+        windows = EvidenceSource(
+            name="w.py",
+            kind="source",
+            text="def f():\r\n    if x:\r\n        return compute(x)\r\n    return None\r\n",
+        )
+        span = "if x:\n        return compute(x)"
+        with self.assertRaises(GateError) as caught:
+            check(
+                [{"requirement": "R", "evidence": span, "detail": "d"}],
+                requirements="R",
+                sources=[windows],
+            )
+        self.assertEqual("evidence_line_endings_differ", caught.exception.reason)
+
+    def test_the_line_ending_reason_still_refuses(self):
+        """Separating a reason must not admit anything new.
+
+        The whole risk of this change is that a clearer diagnostic becomes a
+        tolerance.  Comparison stays exact: the finding is refused, the
+        receipt is never produced, and the only thing that changed is which
+        name the refusal carries.
+        """
+        windows = EvidenceSource(
+            name="w.py", kind="source", text="a = 1\r\nb = 2\r\nc = 3\r\n"
+        )
+        with self.assertRaises(GateError):
+            check(
+                [{"requirement": "R", "evidence": "a = 1\nb = 2", "detail": "d"}],
+                requirements="R",
+                sources=[windows],
+            )
+
+    def test_invented_code_is_still_fabrication_on_a_crlf_source(self):
+        """The new reason must not swallow the old one.
+
+        A quote that is absent however the newlines are read has to keep
+        reporting ``evidence_not_in_context``, or the separation would have
+        traded a false fabrication report for a missed one.
+        """
+        windows = EvidenceSource(
+            name="w.py", kind="source", text="a = 1\r\nb = 2\r\nc = 3\r\n"
+        )
+        with self.assertRaises(GateError) as caught:
+            check(
+                [{"requirement": "R", "evidence": "z = 99\nq = 0", "detail": "d"}],
+                requirements="R",
+                sources=[windows],
+            )
+        self.assertEqual("evidence_not_in_context", caught.exception.reason)
+
+    def test_an_lf_source_with_a_crlf_quote_is_the_same_finding(self):
+        """The mismatch is symmetric; a model may add endings as well as drop them."""
+        unix = EvidenceSource(
+            name="u.py", kind="source", text="a = 1\nb = 2\nc = 3\n"
+        )
+        with self.assertRaises(GateError) as caught:
+            check(
+                [{"requirement": "R", "evidence": "a = 1\r\nb = 2", "detail": "d"}],
+                requirements="R",
+                sources=[unix],
+            )
+        self.assertEqual("evidence_line_endings_differ", caught.exception.reason)
+
+    def test_a_matching_crlf_quote_is_admitted_unchanged(self):
+        """The ordinary case must not have been disturbed by the new branch.
+
+        Padded because the first version of this fixture quoted twelve of
+        eighteen characters and was refused ``evidence_covers_whole_source`` --
+        correctly.  The same bound the tooling in this repository had to
+        satisfy earlier; a test is not exempt from the gate it is testing.
+        """
+        windows = EvidenceSource(
+            name="w.py",
+            kind="source",
+            text="a = 1\r\nb = 2\r\nc = 3\r\nd = 4\r\ne = 5\r\nf = 6\r\n",
+        )
+        receipt = check(
+            [{"requirement": "R", "evidence": "a = 1\r\nb = 2", "detail": "d"}],
+            requirements="R",
+            sources=[windows],
+        )
+        self.assertEqual(1, receipt["quoted_finding_count"])
 
     def test_a_match_offset_and_an_evidence_length_share_one_unit(self):
         """Positions and sizes must be measurable against each other.

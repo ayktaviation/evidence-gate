@@ -365,7 +365,7 @@ honest cost of not publishing them.
 
 ```bash
 cd evidence-gate
-python -m unittest discover -s tests          # 97 tests, no dependencies, no install
+python -m unittest discover -s tests          # 102 tests, no dependencies, no install
 python tools/check_claims.py                  # the README's own numbers, verified
 
 # with a local Ollama running:
@@ -402,7 +402,7 @@ indentation and a different Unicode normal form; all four are refused.
 The gate stops at the first inadmissible finding rather than collecting every
 problem, because one inadmissible quote already makes the answer inadmissible.
 
-Every refusal is one of twelve declared reasons, and raising an undeclared one
+Every refusal is one of thirteen declared reasons, and raising an undeclared one
 is a programming error. A test asserts the suite contains a control for every
 one, so adding a way to refuse without a control for it fails the build:
 
@@ -417,6 +417,7 @@ one, so adding a way to refuse without a control for it fails the build:
 | `evidence_covers_whole_source` | quoted (nearly) the entire file |
 | `evidence_kind_not_allowed` | quoted something real, of the wrong kind |
 | `evidence_not_in_context` | quoted something never shown |
+| `evidence_line_endings_differ` | matches except for CRLF vs LF; still refused |
 | `absence_pattern_too_short` | absent from almost any text |
 | `absence_pattern_too_broad` | absent by construction, so absence proves nothing |
 | `absence_pattern_present` | claimed text is missing; it is in the file |
@@ -426,6 +427,18 @@ than declining to accept it. If both it and `absence_pattern_too_broad` apply,
 the gate reports the refutation: *that text is in your file* says something
 true about the code, while *your pattern was too broad* only grades the
 question.
+
+`evidence_line_endings_differ` exists because this library made its own
+headline mistake. A quote that matched apart from CRLF vs LF was reported as
+`evidence_not_in_context` — the same reason as invented code. On a repository
+checked out on Windows, with a model that reflows its answer to LF, every
+multi-line quote looked like fabrication and the cause was the checkout. The
+README above argues at length that a gate reporting *format* when you asked
+about *evidence* is measuring the harness; this gate was doing that, and four
+near-miss controls plus a 97-test suite did not catch it, because none of them
+used a CRLF source. **Nothing is admitted that was not admitted before** — comparison
+is still exact and the quote is still refused. Only the name changed, so you
+can tell "normalise your sources" from "distrust your model".
 
 `evidence_kind_not_allowed` is the one that is easy to miss. Each source
 carries a caller-chosen `kind`, and `allowed_kinds` restricts what may be

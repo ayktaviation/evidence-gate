@@ -41,6 +41,7 @@ REASONS = frozenset(
         "evidence_covers_whole_source",
         "evidence_kind_not_allowed",
         "evidence_not_in_context",
+        "evidence_line_endings_differ",
     }
 )
 
@@ -168,6 +169,29 @@ def _states(
     if whole_clause:
         return requirement in clauses
     return any(requirement in clause for clause in clauses)
+
+
+def _one_newline(text: str) -> str:
+    """Line endings unified, for telling a platform artefact from invention.
+
+    Used ONLY to pick a refusal reason, never to admit anything.  A quote that
+    needs this to match is still refused; the gate just stops calling it
+    fabrication.
+
+    Why it exists: a repository checked out on Windows has CRLF line endings,
+    a model that reflows its answer emits LF, and every multi-line quote then
+    failed with ``evidence_not_in_context`` -- the same reason as a quote of
+    code that was never shown.  That is this project's own central error
+    committed against itself: reporting a transport artefact as a claim about
+    the model.  The README argues at length that a gate reporting *format*
+    when you asked about *evidence* is measuring the harness, and this gate
+    was doing exactly that on any CRLF source.
+
+    Lone ``\\r`` is folded too.  It is rare, it costs nothing here, and a
+    refusal reason that is right for two of the three conventions would be a
+    worse trap than no special case at all.
+    """
+    return text.replace("\r\n", "\n").replace("\r", "\n")
 
 
 def _offsets(haystack: str, needle: str) -> list[int]:
@@ -454,6 +478,22 @@ def check(
                     index=index,
                     matched_kinds=sorted(set(elsewhere)),
                     allowed_kinds=sorted(allowed_kinds or ()),
+                    **_field("evidence", evidence),
+                )
+            # A third failure, separated for the same reason as the second.
+            # The quote IS in the source apart from its line endings, so the
+            # model did read the code and the mismatch came from the platform
+            # the file was checked out on.  Still refused -- comparison stays
+            # exact, and nothing here admits a quote it could not find -- but
+            # a caller seeing this knows to normalise its sources rather than
+            # to distrust its model.
+            if any(
+                _one_newline(evidence) in _one_newline(source.text)
+                for source in scoped
+            ):
+                raise GateError(
+                    "evidence_line_endings_differ",
+                    index=index,
                     **_field("evidence", evidence),
                 )
             raise GateError(
