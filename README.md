@@ -255,12 +255,20 @@ scope you cannot state is a bound you are trusting, not using.
 
 ```bash
 cd evidence-gate
-python -m unittest discover -s tests          # 46 tests, no dependencies, no install
+python -m unittest discover -s tests          # 57 tests, no dependencies, no install
 python tools/check_claims.py                  # the README's own numbers, verified
 
 # with a local Ollama running:
 python examples/reproduce.py --model qwen3:8b   # the 88-byte measurement
 python examples/at_scale.py  --model qwen3:8b   # the 26 KB one, which fails
+
+# against a third party's ground truth (QuixBugs checkout, not vendored here):
+export EVIDENCE_GATE_DATASET=/path/to/QuixBugs
+python -m unittest discover -s tests          # 5 harness controls stop skipping
+python examples/against_a_dataset.py --dataset "$EVIDENCE_GATE_DATASET" \
+       --model devstral:24b                   # how often admissible means correct
+python examples/against_a_dataset.py --dataset "$EVIDENCE_GATE_DATASET" \
+       --model devstral:24b --rename          # the same, with names made meaningless
 ```
 
 The example prints the model's receipt (model digest, and separate hashes for
