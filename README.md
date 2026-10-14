@@ -255,7 +255,7 @@ scope you cannot state is a bound you are trusting, not using.
 
 ```bash
 cd evidence-gate
-python -m unittest discover -s tests          # 79 tests, no dependencies, no install
+python -m unittest discover -s tests          # 84 tests, no dependencies, no install
 python tools/check_claims.py                  # the README's own numbers, verified
 
 # with a local Ollama running:

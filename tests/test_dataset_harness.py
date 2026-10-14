@@ -71,6 +71,108 @@ class GroundTruthExtraction(unittest.TestCase):
         model is being asked to review against nothing."""
         self.assertIsNone(harness._requirement('def f():\n    return 1\n\n"""x"""\n'))
 
+    def test_the_builtin_allowlist_does_not_depend_on_how_this_file_was_loaded(self):
+        """The defect that made the tests and the measurement disagree.
+
+        The allowlist was built from ``dir(__builtins__)``.  Inside
+        ``__main__`` that is the builtins *module*, so ``dir`` returns the
+        builtin names; inside an imported module it is that module's
+        ``__dict__``, so ``dir`` returns a dict's own methods.  Every real
+        run of this harness is a script and every test of it is an import, so
+        the suite was exercising a different allowlist from the one that
+        produced the published numbers -- and passing, because nothing
+        checked a name that fell out.
+
+        Asserted through the public function rather than by inspecting the
+        set, so the test keeps meaning something if the allowlist moves.
+        """
+        for name in ("any", "all", "max", "min", "sum", "len", "range"):
+            with self.subTest(builtin=name):
+                source = f"def g(xs):\n    return {name}(xs)\n"
+                renamed = harness._rename(source)
+                self.assertIsNotNone(renamed)
+                self.assertIn(
+                    name, renamed, f"{name!r} is a builtin and must not be renamed"
+                )
+
+    def test_renaming_cannot_erase_the_defect_it_is_controlling_for(self):
+        """sieve, which is how the allowlist bug surfaced.
+
+        Its defect is ``any`` against ``all``.  With both missing from the
+        allowlist they were rewritten to the same opaque name, the broken and
+        fixed programs came out byte-identical, and the case was dropped for
+        having no single-line diff -- a control silently deleting the very
+        thing it was meant to measure.  A rename that makes the two versions
+        identical is always a harness failure, never a result.
+        """
+        broken = "def f(ns, ps):\n    if any(n % p > 0 for n in ns for p in ps):\n        return 1\n    return 0\n"
+        fixed = broken.replace("any(", "all(")
+        self.assertNotEqual(
+            harness._rename(broken),
+            harness._rename(fixed),
+            "the rename erased the difference between broken and fixed",
+        )
+
+    def test_normalising_reformats_without_touching_the_names(self):
+        """The middle arm, which is what makes the contamination claim honest.
+
+        ``--rename`` changes two things at once: the identifiers and, because
+        it reparses, the whitespace.  A model that simply reads reformatted
+        code less well would produce the same localisation drop with
+        contamination playing no part at all.  This arm performs the identical
+        round-trip and leaves the names alone, so the two variables can be
+        separated instead of disclaimed.
+        """
+        source = "def gcd(a, b):\n    if b == 0:\n        return a\n    return gcd(a % b, b)\n"
+        normalised = harness._rename(source, rename=False)
+        self.assertIsNotNone(normalised)
+        for name in ("gcd", "a", "b"):
+            self.assertIn(name, normalised, f"{name!r} must survive normalising")
+        self.assertIn("%", normalised)
+
+        renamed = harness._rename(source)
+        self.assertNotIn("gcd", renamed, "the rename arm must still rename")
+        self.assertNotEqual(normalised, renamed)
+
+    def test_the_two_reformatted_arms_differ_only_in_their_names(self):
+        """Otherwise the middle arm is not controlling what it claims to.
+
+        Both arms go through ``ast.unparse``, so their structure must match
+        line for line.  If normalising produced a different shape from
+        renaming, the comparison between them would be measuring the shape
+        difference as well, which is the exact confound this arm exists to
+        remove.
+        """
+        source = "def gcd(a, b):\n    if b == 0:\n        return a\n    return gcd(a % b, b)\n"
+        normalised = harness._rename(source, rename=False).splitlines()
+        renamed = harness._rename(source).splitlines()
+        self.assertEqual(len(normalised), len(renamed))
+        for left, right in zip(normalised, renamed):
+            self.assertEqual(
+                len(left) - len(left.lstrip()),
+                len(right) - len(right.lstrip()),
+                "indentation must match between the two reformatted arms",
+            )
+
+    def test_asking_for_both_reformatted_arms_is_refused(self):
+        """--rename already reformats, so --rename --normalise is one arm
+        recorded under two names, and the control would quietly vanish."""
+        import subprocess
+
+        finished = subprocess.run(
+            [
+                sys.executable,
+                str(ROOT / "examples" / "against_a_dataset.py"),
+                "--dataset", "/nonexistent",
+                "--rename",
+                "--normalise",
+            ],
+            capture_output=True,
+            text=True,
+        )
+        self.assertNotEqual(0, finished.returncode)
+        self.assertIn("would record one arm under two names", finished.stderr)
+
     def test_renaming_removes_the_names_and_keeps_the_algorithm(self):
         source = "def gcd(a, b):\n    if b == 0:\n        return a\n    return gcd(a % b, b)\n"
         renamed = harness._rename(source)

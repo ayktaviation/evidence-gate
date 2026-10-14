@@ -37,6 +37,7 @@ from __future__ import annotations
 
 import argparse
 import ast
+import builtins as _builtins
 import difflib
 import hashlib
 import json
@@ -123,7 +124,7 @@ def _without_docstrings(source: str) -> str:
     return "\n".join(lines) + "\n" if lines else ""
 
 
-def _rename(source: str) -> str | None:
+def _rename(source: str, *, rename: bool = True) -> str | None:
     """Rewrite identifiers to opaque names, preserving behaviour.
 
     The control for contamination.  ``gcd`` and ``levenshtein`` are names a
@@ -136,12 +137,37 @@ def _rename(source: str) -> str | None:
     Reparsing through ``ast.unparse`` also normalises formatting, which is why
     ground truth is re-derived from the renamed pair rather than mapped across
     from the original.
+
+    That normalisation was a confound, and ``rename=False`` is what removes
+    it.  Measured first without this: localisation fell from 47% to 14% on
+    one model when identifiers were stripped, and the honest reading of that
+    number had to admit the rename arm changed *two* things -- the names and
+    the whitespace.  A model that localises worse on reformatted code would
+    produce the same drop with contamination playing no part.  So
+    ``rename=False`` performs the identical round-trip and leaves the
+    identifiers alone, giving a middle arm: published to normalised isolates
+    formatting, normalised to renamed isolates the names.
     """
     try:
         tree = ast.parse(source)
     except SyntaxError:
         return None
-    builtins = set(dir(__builtins__)) | {
+    # ``import builtins``, not ``dir(__builtins__)``.  The second one is a
+    # trap: ``__builtins__`` is the module inside ``__main__`` and that
+    # module's ``__dict__`` inside an imported module, so ``dir()`` of it
+    # returns the builtin names when this file is run as a script and a
+    # dict's own methods when it is imported.  The allowlist therefore lost
+    # ``any``, ``all`` and ``max`` under the test suite while keeping them
+    # under every real run.
+    #
+    # That is not a cosmetic difference.  sieve's defect is ``any`` against
+    # ``all``; with both absent from the allowlist they are both rewritten to
+    # the same opaque name, the broken and fixed programs come out identical,
+    # and the case is silently dropped for having no single-line diff.  The
+    # measurement was right and the tests were checking something else --
+    # exactly the harness-defect-versus-model-defect confusion this
+    # repository exists to argue against, found in its own harness.
+    allowed = set(dir(_builtins)) | {
         "self", "True", "False", "None", "range", "len", "list", "dict", "set",
         "tuple", "int", "str", "float", "bool", "sorted", "enumerate", "abs",
         "min", "max", "sum", "zip", "reversed", "map", "filter", "print",
@@ -151,7 +177,7 @@ def _rename(source: str) -> str | None:
     mapping: dict[str, str] = {}
 
     def opaque(name: str, prefix: str) -> str:
-        if name in builtins or name.startswith("__"):
+        if name in allowed or name.startswith("__"):
             return name
         if name not in mapping:
             mapping[name] = f"{prefix}{len(mapping)}"
@@ -174,18 +200,27 @@ def _rename(source: str) -> str | None:
             return node
 
     stripped = ast.parse(_without_docstrings(source) or source)
+    if rename:
+        stripped = ast.fix_missing_locations(Rewrite().visit(stripped))
     try:
-        return ast.unparse(ast.fix_missing_locations(Rewrite().visit(stripped)))
+        return ast.unparse(stripped)
     except Exception:  # noqa: BLE001 - an unrenameable case is skipped, not fixed
         return None
 
 
-def cases(dataset: pathlib.Path, rename: bool) -> list[dict]:
+def cases(
+    dataset: pathlib.Path, rename: bool, *, normalise: bool = False
+) -> list[dict]:
     """Programs with exactly one changed code line, which is the ground truth.
 
     Only single-line defects are kept.  A multi-line defect has no single
     correct answer to point at, so scoring a quote against it would measure
     the scorer's generosity rather than the model.
+
+    ``normalise`` is the middle arm: the same ``ast.unparse`` round-trip the
+    rename arm performs, with the identifiers left alone.  It exists so the
+    contamination claim can be stated without the formatting confound riding
+    along inside it.
     """
     broken_root = dataset / "python_programs"
     fixed_root = dataset / "correct_python_programs"
@@ -203,9 +238,9 @@ def cases(dataset: pathlib.Path, rename: bool) -> list[dict]:
         if requirement is None:
             continue
 
-        if rename:
-            broken_shown = _rename(broken_source)
-            fixed_shown = _rename(fixed_source)
+        if rename or normalise:
+            broken_shown = _rename(broken_source, rename=rename)
+            fixed_shown = _rename(fixed_source, rename=rename)
             if broken_shown is None or fixed_shown is None:
                 continue
         else:
@@ -345,18 +380,35 @@ def main() -> int:
         action="store_true",
         help="strip identifiers of meaning; the contamination control",
     )
+    parser.add_argument(
+        "--normalise",
+        action="store_true",
+        help="reformat through ast.unparse but keep the identifiers; the arm "
+        "that separates the formatting change from the naming change",
+    )
     parser.add_argument("--out", type=pathlib.Path, help="write the run as JSON")
     options = parser.parse_args()
 
-    selected = cases(options.dataset, options.rename)
+    if options.rename and options.normalise:
+        raise SystemExit(
+            "--rename already reformats through ast.unparse; asking for both "
+            "would record one arm under two names and the middle arm would "
+            "stop being a control"
+        )
+
+    selected = cases(options.dataset, options.rename, normalise=options.normalise)
     if options.limit:
         selected = selected[: options.limit]
     if not selected:
         raise SystemExit("no single-line cases found")
 
+    arm = (
+        "renamed" if options.rename
+        else "reformatted, names kept" if options.normalise
+        else "as published"
+    )
     print(f"dataset: {options.dataset}")
-    print(f"cases: {len(selected)} single-line defects, identifiers "
-          f"{'renamed' if options.rename else 'as published'}")
+    print(f"cases: {len(selected)} single-line defects, identifiers {arm}")
     print(f"model: {options.model}")
     print(
         "contamination: this dataset is public and predates these models; "
@@ -504,6 +556,11 @@ def main() -> int:
                 {
                     "dataset": str(options.dataset),
                     "renamed": options.rename,
+                    # Recorded separately from ``renamed`` so an old run file
+                    # keeps meaning exactly what it meant: absent is false,
+                    # and the three arms stay distinguishable in the receipt
+                    # rather than by which filename someone chose.
+                    "normalised": options.normalise,
                     "model": options.model,
                     "seed": options.seed,
                     "cases": len(results),
