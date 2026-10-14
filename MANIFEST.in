@@ -1,0 +1,17 @@
+# The source distribution ships the test suite, so it has to ship what the
+# suite reads.  Without this file setuptools included `tests/` and left out
+# `tools/` and `examples/`, so `python -m unittest discover -s tests` inside an
+# unpacked sdist collected 92 of 148 tests and reported two import errors --- a
+# suite that looks present and cannot run, which is the failure mode this
+# repository exists to argue against.
+#
+# `measurements/` and the workflow are here for the same reason: they are what
+# `tools/check_claims.py` reads when it checks that the README's numbers come
+# out of the code.  A claim checker that cannot find the claims is worse than
+# no claim checker, because it still exits non-zero for the wrong reason.
+include CHANGELOG.md
+graft tools
+graft examples
+graft measurements
+recursive-include .github *.yml
+global-exclude __pycache__ *.py[cod]

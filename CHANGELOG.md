@@ -120,6 +120,31 @@ for the same reason the counting already was: a verifier that prepares its
 inputs differently from the writer is testing the verifier. Four controls,
 including the counter-case that pairing identical arms drops nothing.
 
+**Not breaking, packaging: the source distribution shipped a suite it could
+not run.** Found by building the package rather than by reading its
+configuration, and nothing in the library changed.
+
+`MANIFEST.in` did not exist, so setuptools included `tests/` by default and
+left out `tools/`, `examples/`, `measurements/` and the workflow the suite and
+the claim checker read. Unpacked, an sdist collected 90 of 148 tests and
+reported two import errors. The wheel was correct throughout — same contents,
+same metadata, no dependencies — and the installed library was never affected.
+
+It is in the changelog anyway because of what the broken artefact claimed. This
+README invites a reader to check the numbers themselves, and the sdist is the
+copy that carries the suite for exactly that purpose. One that collects
+three-fifths of its tests is not a smaller suite, it is a suite whose result
+means something other than what it says, and the two import errors named the
+missing directories while the surviving 90 still printed their dots. That is
+the same shape as the verifier above, which printed "verified" for a reason it
+would not name.
+
+CI now builds the sdist, unpacks it outside the checkout, and refuses it unless
+it collects the same number of tests as the checkout does — compared by count,
+because this failure exits zero on the tests it can still find. Both halves
+were checked by building the sdist from before the fix: 90 against 148, refused;
+148 against 148, admitted.
+
 **Breaking: adds a refusal reason**, `evidence_line_endings_differ`, which is a
 minor version under the policy above. Code that exhaustively handled every
 reason may now fall through, so the bump is required rather than courteous.

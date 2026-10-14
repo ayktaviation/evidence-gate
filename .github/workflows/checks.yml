@@ -83,3 +83,20 @@ jobs:
               raise AssertionError("a fabricated quote was admitted")
           print("wheel behaves")
           PY
+      # The sdist ships the suite, so the suite has to run from the sdist and
+      # collect every test the checkout collects.  Compared by count rather
+      # than trusted to exit non-zero: a missing `tools/` made two modules
+      # fail to import, and a suite that quietly collects 92 of 148 tests is
+      # the "still prints verified" failure this repository is about.  Run
+      # outside the checkout so nothing resolves against the source tree.
+      - run: |
+          collect() { python -m unittest discover -s tests -v 2>&1 | grep -c '\.\.\. \(ok\|skipped\)'; }
+          expected=$(collect)
+          echo "checkout collects $expected tests"
+          mkdir -p /tmp/sdist && tar -xzf dist/*.tar.gz -C /tmp/sdist
+          cd /tmp/sdist/evidence_gate-*/
+          got=$(collect)
+          echo "sdist collects $got tests"
+          test "$got" = "$expected" || { echo "the sdist omits something its suite reads"; exit 1; }
+          python -m unittest discover -s tests
+          python tools/check_claims.py
