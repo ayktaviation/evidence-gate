@@ -45,6 +45,17 @@ short absence pattern is harder to be absent, so its absence is the stronger
 claim. `record(` is seven characters: inadmissible as a quote, exactly right as
 a search pattern.
 
+`distinct_evidence_count` and `reused_evidence_count` are receipt fields, not
+refusals, and adding them is therefore not breaking. They exist because of the
+one weakness no bound in this library can close: a real, exactly located quote
+reused across unrelated requirements satisfies every check here. Judging
+whether a quote is *about* its requirement needs a reader or a model, and this
+library is neither, so the gate counts what it is not entitled to refuse. The
+same hole exists on the absence side and is worse, because there it cannot even
+be counted — `absent:zqx` is three characters, genuinely missing, and
+worthless. `tests/test_compliant_parasite.py` asserts all of this passes, and
+`tools/check_claims.py` fails the build if the README stops saying so.
+
 Known limits, stated because they bound what the numbers in the README mean:
 
 - The published measurement is nine data points — three local models, three

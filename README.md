@@ -255,7 +255,7 @@ scope you cannot state is a bound you are trusting, not using.
 
 ```bash
 cd evidence-gate
-python -m unittest discover -s tests          # 41 tests, no dependencies, no install
+python -m unittest discover -s tests          # 46 tests, no dependencies, no install
 python tools/check_claims.py                  # the README's own numbers, verified
 
 # with a local Ollama running:
@@ -337,7 +337,9 @@ without trusting it.
   mechanism here is a substring search. What this repository contributes is the
   measurement above, the negative controls, and the two refusals that a naive
   implementation omits.
-- **Not a code reviewer.** It has no opinion about your code.
+- **Not a code reviewer.** It has no opinion about your code — and a model that
+  knows this can exploit it. See [the attack this gate does not
+  stop](#the-attack-this-gate-does-not-stop).
 - **Not a correctness proof.** An admitted finding can be completely wrong.
   Admissible means the model was looking at your file.
 - **Not a security boundary.** Hashes detect stale or careless evidence, not an
@@ -349,6 +351,61 @@ without trusting it.
   (`absence_label`) is weaker still — it records a claim the gate checks
   nothing about — and the receipt counts the two apart so you can never read
   one as the other.
+
+## The attack this gate does not stop
+
+Everything above measures models that answered badly. The harder question is
+what a model does once it understands the gate, and the answer is unflattering
+enough that it gets its own test file (`tests/test_compliant_parasite.py`).
+
+Fabricating a quote gets caught. Pasting the whole file gets caught. Inventing
+a missing sentence gets caught. But copying **one real line** and attaching it
+to every requirement you were given passes every check this library performs:
+
+```python
+# account.py contains "import datetime" on line 2.
+findings = [
+    {"requirement": r, "evidence": "import datetime", "detail": "..."}
+    for r in ("A balance must never be negative.",
+              "Every withdrawal must be written to an audit log.",
+              "A password must never be stored in plain text.",
+              "The session must expire after inactivity.")
+]
+check(findings, requirements=..., sources=[source])   # all four ADMITTED
+```
+
+The gate admits them because every claim it is capable of evaluating is true.
+The span is real, it is located, it is above both floors and below both
+ceilings. Whether a quote is *about* its requirement is a question for a reader
+or a model, and this library is neither. **Refusing this would be a judgment
+the gate is not entitled to make**, so it does not refuse it.
+
+What it does instead is the only honest move available: count it.
+
+| receipt field | the lazy answer | an honest answer |
+| --- | --- | --- |
+| `quoted_finding_count` | 4 | 2 |
+| `distinct_evidence_count` | **1** | 2 |
+| `reused_evidence_count` | **3** | 0 |
+
+One distinct span under four findings is not proof of a worthless answer, and
+the receipt does not claim it is. It is arithmetic, not judgment — which is
+exactly why the gate is allowed to report it. A caller who sees those numbers
+knows to look; a caller who never gets them cannot.
+
+The same hole exists on the absence side and cannot be closed by any bound.
+`absent:zqx` is three characters, passes the floor, and is genuinely missing
+from your file — the host really did verify that. The observation is sound and
+the finding is worthless, because a pattern's value depends on whether a
+competent implementation would have contained it, and that is a question about
+plausibility. Plausibility is not a property of a string's length. So:
+**`verified_absence_count` is not a count of real defects**, and anyone reading
+it as one is reading it wrong.
+
+These are the tests I would want a stranger to run first. They are the
+difference between "this library checks that evidence supports a finding" —
+which it does not do — and "this library checks that evidence exists where the
+model said it does", which it does.
 
 ## Provenance
 

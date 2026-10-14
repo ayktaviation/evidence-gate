@@ -19,7 +19,30 @@ import unittest
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 
-from evidence_gate import REASONS, __version__  # noqa: E402
+from evidence_gate import REASONS, EvidenceSource, __version__, check  # noqa: E402
+
+# Read off a real receipt rather than grepped from the source.  A field name
+# that appears in a dict literal is not proof the field is emitted; running
+# the gate once is.
+#
+# The probe source is padded deliberately.  The first attempt quoted twelve
+# characters of a seventeen-character file and the gate refused it with
+# evidence_covers_whole_source -- correctly, since that quote localises
+# nothing.  Worth recording that the tooling had to satisfy the same bound as
+# a model does.
+RECEIPT_FIELDS = frozenset(
+    check(
+        [{"requirement": "A probe.", "evidence": "a probe line", "detail": "."}],
+        requirements=("A probe.",),
+        sources=[
+            EvidenceSource(
+                name="probe",
+                kind="source",
+                text="padding before\na probe line\npadding after it all\n",
+            )
+        ],
+    )
+)
 
 NUMBER_WORDS = {
     1: "one", 2: "two", 3: "three", 4: "four", 5: "five", 6: "six",
@@ -113,12 +136,44 @@ def check_version_is_recorded(report: list[str]) -> list[str]:
     return problems
 
 
+def check_the_blind_spot_is_documented(report: list[str]) -> list[str]:
+    """The gate's unclosable hole stays described, and stays demonstrated.
+
+    This check guards against a specific, tempting kind of drift.  The known
+    weakness here -- that a real quote reused across unrelated requirements is
+    admitted -- is embarrassing to advertise, and the quiet way to stop
+    advertising it is to delete a README section while leaving every test
+    green.  The other checks in this file would not notice.
+
+    So the section, the two receipt fields that make the weakness countable,
+    and the adversarial test file that proves it are all required to coexist.
+    Removing any one of them fails the build, which is the point: a limitation
+    that can be deleted without consequence is a limitation that will be.
+    """
+    readme = _readme()
+    problems = []
+    if "## The attack this gate does not stop" not in readme:
+        problems.append("README no longer documents the gate's known blind spot")
+    for field in ("distinct_evidence_count", "reused_evidence_count"):
+        if field not in readme:
+            problems.append(f"README does not mention the {field} receipt field")
+        if field not in RECEIPT_FIELDS:
+            problems.append(f"the receipt no longer reports {field}")
+    if not (ROOT / "tests" / "test_compliant_parasite.py").exists():
+        problems.append("the adversarial control for the blind spot is gone")
+    report.append(
+        f"blind spot: documented, {len(RECEIPT_FIELDS & {'distinct_evidence_count', 'reused_evidence_count'})}/2 fields reported"
+    )
+    return problems
+
+
 CHECKS = (
     check_test_count,
     check_reason_count,
     check_every_reason_is_documented,
     check_no_placeholder_urls,
     check_version_is_recorded,
+    check_the_blind_spot_is_documented,
 )
 
 

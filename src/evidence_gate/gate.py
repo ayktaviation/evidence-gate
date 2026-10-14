@@ -483,6 +483,25 @@ def check(
         # number of located defects for the number of allegations.
         "quoted_finding_count": sum(1 for row in rows if row["quoted"]),
         "verified_absence_count": sum(1 for row in rows if row["verified_absence"]),
+        # Counted because it cannot be refused.  Every bound in this library
+        # constrains one quote in isolation, and nothing stops a model from
+        # attaching the *same* admissible quote to every requirement it was
+        # given.  That answer passes every check here: the span is real, it is
+        # located, it is inside both ceilings and above both floors.  Judging
+        # whether a quote is *about* its requirement needs a reader or a model,
+        # and this library has neither, so refusing it would be a judgment the
+        # gate is not entitled to make.
+        #
+        # What the gate can do is make the shape visible.  Four findings
+        # carrying one distinct span is not proof of a lazy answer, and the
+        # receipt does not say it is -- but a caller who sees
+        # ``distinct_evidence_count == 1`` next to ``quoted_finding_count == 4``
+        # knows to look, and a caller who never gets the number cannot.
+        "distinct_evidence_count": len(
+            {row["evidence_sha256"] for row in rows if row["quoted"]}
+        ),
+        "reused_evidence_count": sum(1 for row in rows if row["quoted"])
+        - len({row["evidence_sha256"] for row in rows if row["quoted"]}),
         "unverified_absence_count": sum(
             1 for row in rows if not row["quoted"] and not row["verified_absence"]
         ),
