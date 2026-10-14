@@ -197,6 +197,39 @@ class RefusalTests(unittest.TestCase):
     def test_the_table_covers_every_declared_reason(self):
         self.assertEqual(REASONS, {reason for reason, _, _ in REFUSALS})
 
+    def test_the_published_reason_set_is_pinned_by_name(self):
+        """Lock the public interface, because the versioning policy is a claim.
+
+        CHANGELOG.md states that adding or removing a refusal reason is a
+        breaking change: callers are expected to branch on these names, and
+        code that handled every reason yesterday may fall through today.
+        Nothing enforced that.  The test above is self-referential -- add a
+        reason and a control for it together and it still passes -- so the
+        policy was the one rule in this repository with no control of its own.
+
+        Pinned literally, so changing the set is impossible to do by accident.
+        Editing this list is the moment you are meant to read the policy and
+        decide on a version bump; a diff to these twelve strings is the signal
+        a reviewer needs and could not previously get.
+        """
+        self.assertEqual(
+            {
+                "absence_pattern_present",
+                "absence_pattern_too_broad",
+                "absence_pattern_too_short",
+                "evidence_covers_whole_source",
+                "evidence_kind_not_allowed",
+                "evidence_not_in_context",
+                "evidence_too_long",
+                "evidence_too_short",
+                "finding_key_set_mismatch",
+                "finding_not_object",
+                "finding_text_invalid",
+                "requirement_not_exact_quote",
+            },
+            set(REASONS),
+        )
+
     def test_no_refusal_echoes_the_rejected_text(self):
         # A rejected quote is often fabricated text.  A diagnostic that
         # repeats it would launder an unverified claim into the log.

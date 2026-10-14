@@ -365,7 +365,7 @@ honest cost of not publishing them.
 
 ```bash
 cd evidence-gate
-python -m unittest discover -s tests          # 96 tests, no dependencies, no install
+python -m unittest discover -s tests          # 97 tests, no dependencies, no install
 python tools/check_claims.py                  # the README's own numbers, verified
 
 # with a local Ollama running:
