@@ -530,6 +530,14 @@ without trusting it.
   Admissible means the model was looking at your file.
 - **Not a security boundary.** Hashes detect stale or careless evidence, not an
   adversary who can rewrite both the evidence and the code that checks it.
+- **Not type-checked.** The package ships `py.typed`, which tells your type
+  checker to trust its annotations. No type checker has ever run against this
+  code — none is installed here and CI has no type job — so that marker was an
+  unverified claim about itself. It is now partly earned: `check_claims.py`
+  fails if any function in the shipped package leaves a parameter or its return
+  unannotated, which is **completeness, not correctness**. A wrong annotation
+  passes that check and a real type checker would catch it. Closing the rest
+  needs a dependency this repository does not have.
 - **Not sufficient for absence.** A verified absence says one literal string
   does not occur in the text you supplied. It does not say the requirement is
   unmet: the same behaviour can be written a hundred ways, and the model named

@@ -11,6 +11,7 @@ Run it directly; it prints what it verified and exits non-zero on drift.
 """
 from __future__ import annotations
 
+import ast
 import os
 import pathlib
 import re
@@ -192,6 +193,63 @@ def check_the_python_floor_agrees(report: list[str]) -> list[str]:
 
 def _as_version(text: str) -> tuple[int, ...]:
     return tuple(int(part) for part in text.split("."))
+
+
+def check_the_typed_marker_is_earned(report: list[str]) -> list[str]:
+    """``py.typed`` is a promise to type checkers; keep it a true one.
+
+    Shipping that file tells every consumer's type checker to trust this
+    package's annotations instead of treating it as untyped.  It was being
+    shipped without anything verifying it, and no type checker has ever run
+    against this code -- not locally, where none is installed, and not in CI,
+    which has no type job.  An empty marker file asserting a property nobody
+    measured is the exact shape of claim this repository exists to refuse.
+
+    What this checks is narrow and worth stating precisely: every function in
+    the shipped package annotates all of its parameters and its return.  That
+    is completeness, not correctness.  A wrong annotation passes this and a
+    type checker would catch it; this is the strongest check available without
+    a dependency, and the README says plainly that correctness is unverified.
+
+    Parsed rather than imported, so an annotation that only exists under
+    ``from __future__ import annotations`` still counts, and so a syntax error
+    in a module that happens not to be imported cannot hide here.
+    """
+    package = ROOT / "src" / "evidence_gate"
+    marker = package / "py.typed"
+    problems = []
+    if not marker.exists():
+        return ["py.typed is gone; either restore it or stop claiming typing"]
+
+    checked = 0
+    for module in sorted(package.glob("*.py")):
+        tree = ast.parse(module.read_text(encoding="utf-8"), filename=str(module))
+        for node in ast.walk(tree):
+            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            checked += 1
+            arguments = node.args
+            parameters = [
+                *getattr(arguments, "posonlyargs", []),
+                *arguments.args,
+                *arguments.kwonlyargs,
+            ]
+            for extra in (arguments.vararg, arguments.kwarg):
+                if extra is not None:
+                    parameters.append(extra)
+            bare = [
+                parameter.arg
+                for parameter in parameters
+                if parameter.annotation is None
+                and parameter.arg not in {"self", "cls"}
+            ]
+            where = f"{module.name}:{node.lineno} {node.name}"
+            if bare:
+                problems.append(f"{where} has unannotated parameters: {bare}")
+            if node.returns is None:
+                problems.append(f"{where} has no return annotation")
+    report.append(f"typed marker: {checked} functions, annotations complete")
+    return problems
 
 
 def check_the_blind_spot_is_documented(report: list[str]) -> list[str]:
@@ -408,6 +466,7 @@ CHECKS = (
     check_no_placeholder_urls,
     check_version_is_recorded,
     check_the_python_floor_agrees,
+    check_the_typed_marker_is_earned,
     check_the_blind_spot_is_documented,
     check_the_skipped_control_count,
     check_the_measurement_arithmetic,
