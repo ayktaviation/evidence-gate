@@ -469,6 +469,15 @@ def check(
                 "verified_absence": False,
                 **_field("requirement", requirement),
                 **_field("evidence", evidence),
+                # Reported because the receipt was unusable without it.  Every
+                # offset in ``matches`` is a character index -- it comes from
+                # ``str.find`` -- while ``evidence_bytes`` is a byte count, so
+                # a reader trying to turn a match into a span was mixing two
+                # units and getting away with it only on ASCII input.  Found
+                # by writing a consumer that needed exactly that arithmetic,
+                # which is the sort of defect no amount of reading the code
+                # reveals.
+                "evidence_chars": len(evidence),
                 **_field("detail", finding["detail"]),
                 "match_count": len(matches),
                 "matches": matches,

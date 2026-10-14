@@ -136,7 +136,7 @@ class AgainstTheRealDataset(unittest.TestCase):
                     "findings": [
                         {
                             "quoted": True,
-                            "evidence_bytes": len(case["defect_line"]),
+                            "evidence_chars": len(case["defect_line"]),
                             "matches": [{"offset": case["defect_start"]}],
                         }
                     ]
@@ -147,7 +147,7 @@ class AgainstTheRealDataset(unittest.TestCase):
                     "findings": [
                         {
                             "quoted": True,
-                            "evidence_bytes": 1,
+                            "evidence_chars": 1,
                             "matches": [{"offset": case["defect_end"] + 1}],
                         }
                     ]
@@ -163,7 +163,7 @@ class AgainstTheRealDataset(unittest.TestCase):
         case = harness.cases(self.dataset, False)[0]
         receipt = {
             "findings": [
-                {"quoted": False, "evidence_bytes": 0, "matches": []}
+                {"quoted": False, "evidence_chars": 0, "matches": []}
             ]
         }
         self.assertFalse(harness._localised(receipt, case))

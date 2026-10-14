@@ -286,13 +286,20 @@ def _localised(receipt: dict, case: dict) -> bool:
     That is deliberate: if the receipt cannot support this question, the
     receipt is underspecified, and finding that out is worth more than a
     convenient shortcut through the raw finding.
+
+    It did turn out to be underspecified.  Match offsets are character indices
+    and ``evidence_bytes`` is a byte count, so the first version of this
+    function mixed units and was correct only because QuixBugs happens to be
+    pure ASCII.  ``evidence_chars`` was added to the receipt for this, and the
+    bug is worth recording: it was invisible in the library and obvious in the
+    first consumer that needed the arithmetic.
     """
     for row in receipt["findings"]:
         if not row["quoted"]:
             continue
         for match in row["matches"]:
             start = match["offset"]
-            end = start + row["evidence_bytes"]
+            end = start + row["evidence_chars"]
             if start < case["defect_end"] and case["defect_start"] < end:
                 return True
     return False

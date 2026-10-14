@@ -256,6 +256,63 @@ class NearMissTests(unittest.TestCase):
             self._refused("def withdraw(account, amount):\naccount.balance -= amount"),
         )
 
+    def test_a_match_offset_and_an_evidence_length_share_one_unit(self):
+        """Positions and sizes must be measurable against each other.
+
+        The receipt reports match offsets from ``str.find``, which are
+        character indices, and ``evidence_bytes`` from a UTF-8 encode, which
+        is a byte count.  Anyone turning a match into a span needs a length in
+        the same unit as the offset, and for a while the receipt published no
+        such field -- so the first consumer that needed the arithmetic was
+        mixing units and surviving only because its input was ASCII.
+
+        The multi-byte text has to sit inside the quote, not merely in the
+        file.  A first attempt put it in a preceding comment and the control
+        passed for the wrong reason: the offset shifts, but an ASCII quote's
+        byte and character lengths still agree, so the units never collide.
+        With the non-ASCII characters in the evidence itself,
+        ``offset + evidence_bytes`` overshoots the end of the span and
+        ``offset + evidence_chars`` lands exactly on it.
+        """
+        source = EvidenceSource(
+            name="unicode.py",
+            kind="source",
+            # Padded past twice the quote's length, because the whole-source
+            # ceiling refused a shorter version of this very control.
+            text=(
+                "# byte ile karakter ayni sey degildir\n"
+                "value = compute(ölçüm, total)\n"
+                "return value\n"
+            ),
+        )
+        evidence = "value = compute(ölçüm, total)"
+        requirement = "A value must be computed."
+
+        receipt = check(
+            [{"requirement": requirement, "evidence": evidence, "detail": "."}],
+            requirements=requirement,
+            sources=[source],
+        )
+        row = receipt["findings"][0]
+        offset = row["matches"][0]["offset"]
+
+        self.assertNotEqual(
+            len(source.text.encode("utf-8")),
+            len(source.text),
+            "the control source is no longer multi-byte, so it proves nothing",
+        )
+        self.assertEqual(len(evidence), row["evidence_chars"])
+        self.assertEqual(
+            evidence,
+            source.text[offset : offset + row["evidence_chars"]],
+            "offset plus evidence_chars must recover exactly the quote",
+        )
+        self.assertNotEqual(
+            evidence,
+            source.text[offset : offset + row["evidence_bytes"]],
+            "if bytes and chars agree here the control has stopped working",
+        )
+
     def test_different_unicode_normal_form_is_refused(self):
         source = EvidenceSource(
             name="u.py", kind="source", text=unicodedata.normalize("NFC", "tutar = ödenen")
