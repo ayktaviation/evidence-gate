@@ -9,6 +9,7 @@
         "mean_lines": 8.9429,
         "near_misses": 24,
         "refused": {},
+        "run_sha256": "2bc319ace6f4e204099e943a01f4246a32322c63f7eb949286819a9540980261",
         "within_one_line": 9
       },
       "published": {
@@ -21,6 +22,7 @@
         "refused": {
           "evidence_not_in_context": 2
         },
+        "run_sha256": "be7dd0d79f3cef094e48e8a8b9b0cd03733534ee58b261ca8c0c2c73691dff3d",
         "within_one_line": 9
       },
       "renamed": {
@@ -31,6 +33,7 @@
         "mean_lines": 8.9429,
         "near_misses": 31,
         "refused": {},
+        "run_sha256": "92ae9f0c293e21970325d51547afa81c9ae4401124c4677699752f49187b40e1",
         "within_one_line": 1
       }
     },
@@ -43,6 +46,7 @@
         "mean_lines": 8.9429,
         "near_misses": 18,
         "refused": {},
+        "run_sha256": "c99bc9434bca70811ef0bbf5f2caa02cee88043723c91dd6f4802a3ebde06eb2",
         "within_one_line": 4
       },
       "published": {
@@ -53,6 +57,7 @@
         "mean_lines": 10.6571,
         "near_misses": 18,
         "refused": {},
+        "run_sha256": "0d192d01b845a3d9e27628084841637dbc41ff9b3af9047c19870c7c00fdc29b",
         "within_one_line": 4
       },
       "renamed": {
@@ -65,6 +70,7 @@
         "refused": {
           "evidence_too_short": 1
         },
+        "run_sha256": "595b08428138a822aae2399b185782bf79b0b60c8440892485db666653d4d3e4",
         "within_one_line": 0
       }
     },
@@ -79,6 +85,7 @@
         "refused": {
           "evidence_not_in_context": 2
         },
+        "run_sha256": "79b9d559c8db2bf9014aaef584ddd57678f04980736d7a6933883d8dab7c1f8c",
         "within_one_line": 7
       },
       "published": {
@@ -91,6 +98,7 @@
         "refused": {
           "evidence_not_in_context": 2
         },
+        "run_sha256": "426951f456ceef85e4d56cdbea6be86ffa474cd2846cd463597fd4214fdbda08",
         "within_one_line": 8
       },
       "renamed": {
@@ -103,12 +111,13 @@
         "refused": {
           "evidence_too_short": 1
         },
+        "run_sha256": "24f268a55f068bf4d6e8f78bebedd21c7912904eb38ee7f4cec9487c2328656f",
         "within_one_line": 6
       }
     }
   },
   "dataset": "QuixBugs single-line Python defects",
-  "note": "Counts only, by design: the run files name the holdout cases and are not published. Sufficient to recompute every statistic in the README, insufficient to ask a new question.",
+  "note": "Counts only, by design: the run files name the holdout cases and are not published. Sufficient to recompute every statistic in the README, insufficient to ask a new question. Each arm names the SHA-256 of the run file it was computed from, so a holder of those files can refute these counts; a digest reveals nothing about the cases.",
   "paired": true,
-  "schema": "evidence-gate-localisation-aggregate-v1"
+  "schema": "evidence-gate-localisation-aggregate-v2"
 }

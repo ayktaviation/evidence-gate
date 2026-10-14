@@ -33,9 +33,20 @@ from __future__ import annotations
 
 import argparse
 import collections
+import hashlib
 import json
 import pathlib
 from math import comb, erfc, sqrt
+
+
+def _digest(path: pathlib.Path) -> str:
+    """SHA-256 of a run file, to bind a published count to a specific input.
+
+    Over the bytes on disk, not over a parsed and re-serialised copy, so the
+    digest matches what ``sha256sum`` prints and can be checked without this
+    tool.
+    """
+    return hashlib.sha256(pathlib.Path(path).read_bytes()).hexdigest()
 
 
 def fisher_two_tailed(a: int, b: int, c: int, d: int) -> float:
@@ -132,6 +143,87 @@ def binomial_at_most(successes: int, trials: int, rate: float) -> float:
     )
 
 
+def _arm_counts(by_model: dict[str, dict[str, dict]]) -> dict:
+    """The publishable part of each arm: counts, and the digest they came from.
+
+    One function, used both to write an aggregate and to verify one, so the
+    two cannot drift apart.  A verifier that computes its fields differently
+    from the writer tests the verifier.
+    """
+    return {
+        model: {
+            arm: {
+                "cases": summary["cases"],
+                "admitted": summary["admitted"],
+                "localised": summary["localised"],
+                # The near-miss denominator is the misses whose distance could
+                # be measured at all, which is adjacent plus scattered -- not
+                # every miss, since an absence finding has no line to miss by.
+                "near_misses": summary["adjacent"] + summary["scattered"],
+                "within_one_line": summary["adjacent"],
+                "chance": round(summary["chance"], 6),
+                "mean_lines": round(summary["mean_lines"], 4),
+                "refused": dict(summary["refused"]),
+                "run_sha256": _digest(summary["source"]),
+            }
+            for arm, summary in sorted(model_arms.items())
+        }
+        for model, model_arms in sorted(by_model.items())
+    }
+
+
+def _verify_aggregate(
+    path: pathlib.Path, by_model: dict[str, dict[str, dict]]
+) -> list[str]:
+    """Recompute a committed aggregate from run files and refuse on any gap.
+
+    This is the check the committed counts were missing.  A digest in a file
+    nobody verifies is decoration; the point is that someone holding the runs
+    can execute this and get a non-zero exit if the published counts do not
+    follow from them.
+
+    Deliberately strict about shape as well as values.  An arm in the
+    aggregate with no matching run means the committed file claims an input
+    that was not supplied, and that is as much a failure as a wrong count --
+    silently verifying the subset you happen to hold is how a check passes
+    while the claim is false.
+    """
+    committed = json.loads(path.read_text(encoding="utf-8"))
+    recomputed = _arm_counts(by_model)
+    problems: list[str] = []
+
+    expected_arms = committed.get("arms", {})
+    for model in sorted(set(expected_arms) | set(recomputed)):
+        want, got = expected_arms.get(model, {}), recomputed.get(model, {})
+        if not want:
+            problems.append(f"{model}: run files supplied, not in {path.name}")
+            continue
+        if not got:
+            problems.append(f"{model}: in {path.name}, no run file supplied")
+            continue
+        for arm in sorted(set(want) | set(got)):
+            if arm not in got:
+                problems.append(f"{model} {arm}: committed, no run supplied")
+            elif arm not in want:
+                problems.append(f"{model} {arm}: run supplied, not committed")
+            elif want[arm] != got[arm]:
+                for field in sorted(set(want[arm]) | set(got[arm])):
+                    if want[arm].get(field) != got[arm].get(field):
+                        problems.append(
+                            f"{model} {arm} {field}: committed "
+                            f"{want[arm].get(field)!r}, recomputed "
+                            f"{got[arm].get(field)!r}"
+                        )
+
+    if problems:
+        raise SystemExit(
+            f"{path}: does not follow from the runs supplied\n  "
+            + "\n  ".join(problems)
+        )
+    arms = sum(len(a) for a in recomputed.values())
+    return [f"verified {path.name}: {arms} arms match the runs by digest"]
+
+
 def _write_aggregate(options, by_model: dict[str, dict[str, dict]]) -> None:
     """Record the counts the tests consumed, with no case names in them.
 
@@ -151,39 +243,31 @@ def _write_aggregate(options, by_model: dict[str, dict[str, dict]]) -> None:
     What this does NOT preserve: per-case rows, so no new question can be asked
     of this data afterwards.  Re-analysis still needs the run files.  This is a
     record of what was tested, not a substitute for the measurement.
+
+    Each arm also records the SHA-256 of the run file it was computed from.
+    Committing counts alone closed one hole and left another: nothing tied a
+    number to an input, so the counts and the README could be edited together
+    and still agree.  A digest does not make the counts true -- whoever writes
+    both can write a consistent pair -- but it names exactly which bytes are
+    being claimed, so anyone holding the runs can refute the pair, and a
+    silently substituted input stops matching.  A digest is content-free: it
+    cannot be reversed into the case names it was taken over.
     """
-    arms = {
-        model: {
-            arm: {
-                "cases": summary["cases"],
-                "admitted": summary["admitted"],
-                "localised": summary["localised"],
-                # The near-miss denominator is the misses whose distance could
-                # be measured at all, which is adjacent plus scattered -- not
-                # every miss, since an absence finding has no line to miss by.
-                "near_misses": summary["adjacent"] + summary["scattered"],
-                "within_one_line": summary["adjacent"],
-                "chance": round(summary["chance"], 6),
-                "mean_lines": round(summary["mean_lines"], 4),
-                "refused": dict(summary["refused"]),
-            }
-            for arm, summary in sorted(model_arms.items())
-        }
-        for model, model_arms in sorted(by_model.items())
-    }
     options.aggregate.write_text(
         json.dumps(
             {
-                "schema": "evidence-gate-localisation-aggregate-v1",
+                "schema": "evidence-gate-localisation-aggregate-v2",
                 "dataset": "QuixBugs single-line Python defects",
                 "paired": bool(options.paired),
                 "note": (
                     "Counts only, by design: the run files name the holdout "
                     "cases and are not published. Sufficient to recompute "
                     "every statistic in the README, insufficient to ask a new "
-                    "question."
+                    "question. Each arm names the SHA-256 of the run file it "
+                    "was computed from, so a holder of those files can refute "
+                    "these counts; a digest reveals nothing about the cases."
                 ),
-                "arms": arms,
+                "arms": _arm_counts(by_model),
             },
             indent=2,
             sort_keys=True,
@@ -389,6 +473,12 @@ def main() -> int:
         help="write the per-arm counts this tool tested, with no case names, "
         "so the README's statistics stay recomputable without the run files",
     )
+    parser.add_argument(
+        "--verify",
+        type=pathlib.Path,
+        help="check a committed aggregate against these run files: every arm "
+        "must match a run by digest, and the counts must come out the same",
+    )
     options = parser.parse_args()
 
     by_model: dict[str, dict[str, dict]] = {}
@@ -419,6 +509,10 @@ def main() -> int:
                 f"{model}: paired on the {len(shared)} cases common to all "
                 f"{len(arms)} arms, {dropped} dropped"
             )
+
+    if options.verify:
+        for line in _verify_aggregate(options.verify, by_model):
+            print(line)
 
     if options.aggregate:
         _write_aggregate(options, by_model)

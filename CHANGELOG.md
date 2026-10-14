@@ -21,6 +21,23 @@ caller is expected to branch on those names, so:
 
 ## 0.2.0
 
+**Not breaking, in the same release:** the committed measurement counts now
+carry the SHA-256 of the run file each arm was computed from
+(`evidence-gate-localisation-aggregate-v2`), and `significance.py --verify`
+recomputes a committed aggregate from run files and exits non-zero on any gap.
+
+Committing counts in 0.1.0 made the README's statistics checkable against the
+counts and left the counts describing no particular input, so the two could be
+edited together and still agree. A digest does not make a number true — whoever
+writes both can write a consistent pair — but it names which bytes are being
+claimed, so a holder of the runs can refute the pair, and it catches the one
+failure counts alone cannot: a substituted run with identical totals. Both
+failure modes are tested, and `check_claims.py` fails if a digest goes missing,
+is malformed, or is shared by two arms.
+
+The counts themselves were regenerated from the same run files and are
+unchanged; only the schema name, the note and the digests differ.
+
 **Breaking: adds a refusal reason**, `evidence_line_endings_differ`, which is a
 minor version under the policy above. Code that exhaustively handled every
 reason may now fall through, so the bump is required rather than courteous.

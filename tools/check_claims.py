@@ -265,6 +265,7 @@ def check_the_measurement_arithmetic(report: list[str]) -> list[str]:
             second["admitted"] - second["localised"],
         )
 
+    digests = set()
     for model, by_arm in arms.items():
         for arm, counts in by_arm.items():
             fraction = f"{counts['localised']}/{counts['admitted']}"
@@ -272,6 +273,23 @@ def check_the_measurement_arithmetic(report: list[str]) -> list[str]:
                 problems.append(
                     f"README does not state {fraction} for {model} {arm}"
                 )
+            # Provenance is a claim too, and an absent digest is the quiet
+            # failure: the counts go back to describing no particular input.
+            # Shape-checked, since a truncated or placeholder digest binds
+            # nothing while looking like it does.
+            digest = counts.get("run_sha256", "")
+            if not re.fullmatch(r"[0-9a-f]{64}", digest):
+                problems.append(
+                    f"{model} {arm}: no usable run_sha256, so the counts are "
+                    "no longer bound to the run they came from"
+                )
+            digests.add(digest)
+
+    if len(digests) != sum(len(a) for a in arms.values()):
+        problems.append(
+            "two arms claim the same run file: one of them was not computed "
+            "from the input it names"
+        )
 
         formatting = stats.fisher_two_tailed(
             *table(by_arm["published"], by_arm["normalised"])

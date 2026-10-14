@@ -318,6 +318,46 @@ class ArmIdentification(unittest.TestCase):
         self.assertEqual("renamed", summary["arm"])
 
 
+def arm_summary(**counts):
+    """One arm's summary, over a real file so its digest can be taken.
+
+    Module level rather than a base class, so the verifier tests can reuse the
+    fixture without inheriting -- and re-running -- the aggregate tests.
+    """
+    import tempfile
+
+    with tempfile.NamedTemporaryFile(
+        "w", suffix=".json", delete=False, encoding="utf-8"
+    ) as handle:
+        handle.write('{"model": "m", "results": []}')
+        source = pathlib.Path(handle.name)
+    return {
+        "cases": 2,
+        "admitted": 2,
+        "localised": 1,
+        "adjacent": 1,
+        "scattered": 0,
+        "chance": 0.1,
+        "mean_lines": 10.0,
+        "refused": {},
+        "source": source,
+        **counts,
+    }
+
+
+def write_aggregate(by_model):
+    """Write an aggregate to a scratch path; return the path and its inputs."""
+    import argparse
+    import tempfile
+
+    with tempfile.NamedTemporaryFile(
+        "w", suffix=".json", delete=False, encoding="utf-8"
+    ) as handle:
+        out = pathlib.Path(handle.name)
+    stats._write_aggregate(argparse.Namespace(aggregate=out, paired=True), by_model)
+    return out, by_model
+
+
 class Aggregate(unittest.TestCase):
     """The committed counts must carry the statistics and not the case list.
 
@@ -330,29 +370,9 @@ class Aggregate(unittest.TestCase):
     """
 
     def aggregate_of(self, **counts):
-        import argparse
         import json
-        import tempfile
 
-        summary = {
-            "cases": 2,
-            "admitted": 2,
-            "localised": 1,
-            "adjacent": 1,
-            "scattered": 0,
-            "chance": 0.1,
-            "mean_lines": 10.0,
-            "refused": {},
-            **counts,
-        }
-        with tempfile.NamedTemporaryFile(
-            "w", suffix=".json", delete=False, encoding="utf-8"
-        ) as handle:
-            out = pathlib.Path(handle.name)
-        stats._write_aggregate(
-            argparse.Namespace(aggregate=out, paired=True),
-            {"m": {"published": summary}},
-        )
+        out, _ = write_aggregate({"m": {"published": arm_summary(**counts)}})
         return out.read_text(encoding="utf-8"), json.loads(out.read_text())
 
     def test_no_case_name_reaches_the_committed_counts(self):
@@ -368,6 +388,13 @@ class Aggregate(unittest.TestCase):
             for arm, counts in by_arm.items():
                 for key, value in counts.items():
                     if key == "refused":
+                        continue
+                    if key == "run_sha256":
+                        # The one string permitted, and it is constrained to a
+                        # shape no case name can take: 64 hex characters.  A
+                        # blanket exemption for strings would reopen the hole
+                        # this test exists to close.
+                        self.assertRegex(value, r"\A[0-9a-f]{64}\Z")
                         continue
                     self.assertIsInstance(
                         value, (int, float), f"{model}/{arm}/{key} is not a count"
@@ -397,6 +424,71 @@ class Aggregate(unittest.TestCase):
         _, data = self.aggregate_of(adjacent=3, scattered=4)
         self.assertEqual(7, data["arms"]["m"]["published"]["near_misses"])
         self.assertEqual(3, data["arms"]["m"]["published"]["within_one_line"])
+
+
+class Verification(unittest.TestCase):
+    """Counts bound to a digest, and a verifier that can actually fail.
+
+    Committing counts made the README's arithmetic checkable against the
+    aggregate, and left the aggregate itself unchecked against anything: a
+    number and its source could be edited together and still agree.  The
+    digest does not fix authorship -- whoever writes both can write a
+    consistent pair -- it fixes which bytes are being claimed, so a holder of
+    the runs can refute the pair and a swapped input stops matching.
+
+    These tests exist because a verifier nobody has seen fail is an
+    assumption.
+    """
+
+    def written(self, **counts):
+        """A committed aggregate plus the summaries it was computed from."""
+        return write_aggregate({"m": {"published": arm_summary(**counts)}})
+
+    def test_an_untouched_aggregate_verifies(self):
+        """Otherwise every failure below proves nothing."""
+        out, by_model = self.written()
+        self.assertIn("match the runs", stats._verify_aggregate(out, by_model)[0])
+
+    def test_a_changed_count_is_refused_and_names_the_field(self):
+        import json
+
+        out, by_model = self.written()
+        data = json.loads(out.read_text(encoding="utf-8"))
+        data["arms"]["m"]["published"]["localised"] = 99
+        out.write_text(json.dumps(data), encoding="utf-8")
+        with self.assertRaises(SystemExit) as caught:
+            stats._verify_aggregate(out, by_model)
+        self.assertIn("localised", str(caught.exception))
+        self.assertIn("99", str(caught.exception))
+
+    def test_a_substituted_run_is_refused_though_the_counts_agree(self):
+        """The failure counts alone could not catch.
+
+        Same numbers, different input file.  Without the digest this passes
+        and the aggregate silently describes a run nobody committed.
+        """
+        out, by_model = self.written()
+        other = arm_summary()
+        other["source"].write_text('{"model": "m", "results": [0]}', encoding="utf-8")
+        with self.assertRaises(SystemExit) as caught:
+            stats._verify_aggregate(out, {"m": {"published": other}})
+        self.assertIn("run_sha256", str(caught.exception))
+
+    def test_a_withheld_arm_is_refused_rather_than_skipped(self):
+        """Verifying only the subset you hold is how a check passes falsely."""
+        out, by_model = self.written()
+        with self.assertRaises(SystemExit) as caught:
+            stats._verify_aggregate(out, {})
+        self.assertIn("no run file supplied", str(caught.exception))
+
+    def test_an_extra_arm_is_refused_rather_than_absorbed(self):
+        """A run the committed file does not mention is also a mismatch."""
+        out, by_model = self.written()
+        extra = dict(by_model)
+        extra["other-model"] = {"published": arm_summary()}
+        with self.assertRaises(SystemExit) as caught:
+            stats._verify_aggregate(out, extra)
+        self.assertIn("not in", str(caught.exception))
 
 
 class Binomial(unittest.TestCase):

@@ -21,6 +21,28 @@ except GateError as refusal:
     print(refusal.diagnostic)    # hashes and byte counts, never the text
 ```
 
+Copy `src/evidence_gate/` into your project, or `pip install -e .`. Python
+3.11+, standard library only.
+
+**Where to go next**, because most of what follows is a lab notebook rather
+than a manual:
+
+- [How it decides](#how-it-decides) — the thirteen refusal reasons, the bounds,
+  and what the receipt contains. **Start here if you want to use this.**
+- [Try it in 60 seconds](#try-it-in-60-seconds) — the test suite and the
+  self-checking claims, no model required.
+- [What this is not](#what-this-is-not) and [the attack this gate does not
+  stop](#the-attack-this-gate-does-not-stop) — read before you trust it.
+- [The thing I actually found](#the-thing-i-actually-found) through
+  [Admissible is not correct](#admissible-is-not-correct) — how the bounds were
+  arrived at, and the two measurements that misled me on the way. Narrative, in
+  the order it happened, including the parts that did not work.
+
+The measurement sections come first in this file because every threshold below
+is there for a reason that was measured rather than designed, and a reader who
+skips them will read the bounds as arbitrary. They are longer than the manual,
+which is honest about what this project mostly is.
+
 ## The thing I actually found
 
 I built this expecting to measure how often local models fabricate evidence.
@@ -361,11 +383,30 @@ true the build fails. Counts are enough to re-run the tests and not enough to
 ask a new question of the data — re-analysis needs the run files, which is the
 honest cost of not publishing them.
 
+**Each arm also names the SHA-256 of the run file it was computed from**, which
+closes the obvious objection to the paragraph above: committing counts made the
+prose checkable against the counts and left the counts describing no particular
+input, so the two could be edited together and still agree. A digest does not
+establish that a number is true — whoever writes both can write a consistent
+pair — it establishes *which bytes are being claimed*. Anyone holding the runs
+can run
+
+```bash
+python tools/significance.py --paired run-*.json --verify measurements/quixbugs-2026-10-13.json
+```
+
+and get a non-zero exit if the published counts do not follow from them. That
+catches the failure counts alone cannot: a substituted run with the same
+totals. `check_claims.py` additionally fails if a digest goes missing, is
+malformed, or is shared by two arms, because provenance that nothing defends
+decays back into decoration. A digest is content-free and cannot be reversed
+into the case names it was taken over, so this adds no leak.
+
 ## Try it in 60 seconds
 
 ```bash
 cd evidence-gate
-python -m unittest discover -s tests          # 102 tests, no dependencies, no install
+python -m unittest discover -s tests          # 107 tests, no dependencies, no install
 python tools/check_claims.py                  # the README's own numbers, verified
 
 # with a local Ollama running:
