@@ -15,6 +15,7 @@ the 88-byte file, which is how the scale defect was found.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import pathlib
 import sys
@@ -27,7 +28,7 @@ from evidence_gate.ollama import ReviewerUnavailable, ask  # noqa: E402
 
 SUBJECTS = ("src/evidence_gate/gate.py", "src/evidence_gate/ollama.py")
 
-REQUIREMENTS = (
+DEFAULT_REQUIREMENTS = (
     "Every refusal must name a reason that is declared in advance.",
     "A diagnostic must never contain the text that was rejected.",
     "A quote must be compared without normalising whitespace or case.",
@@ -54,34 +55,36 @@ SYSTEM = (
 )
 
 
-# The shape the gate requires, expressed so the server can enforce it during
-# decoding instead of the harness hoping for it afterwards.
-#
-# 'requirement' is an enum of the exact requirement strings.  With a free
-# string there, all three models paraphrased and all three were refused with
-# requirement_not_exact_quote -- which is a harness defect wearing a model
-# defect's clothes.  The gate demands an exact requirement; the harness should
-# therefore make an inexact one unrepresentable rather than punish it after the
-# fact.  Nothing about evidence is constrained, because that is the claim under
-# test and constraining it would be rigging the experiment.
-SCHEMA = {
-    "type": "object",
-    "properties": {
-        "findings": {
-            "type": "array",
-            "items": {
-                "type": "object",
-                "properties": {
-                    "requirement": {"type": "string", "enum": list(REQUIREMENTS)},
-                    "evidence": {"type": "string"},
-                    "detail": {"type": "string"},
+def schema_for(requirements: tuple[str, ...]) -> dict:
+    """The shape the gate requires, as a schema the server enforces while
+    decoding instead of something the harness hopes for afterwards.
+
+    ``requirement`` is an enum of the exact requirement strings.  With a free
+    string there, all three models paraphrased and all three were refused with
+    requirement_not_exact_quote -- a harness defect wearing a model defect's
+    clothes.  The gate demands an exact requirement, so the harness should make
+    an inexact one unrepresentable rather than punish it after the fact.
+    Nothing about ``evidence`` is constrained, because that is the claim under
+    test and constraining it would rig the experiment.
+    """
+    return {
+        "type": "object",
+        "properties": {
+            "findings": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "requirement": {"type": "string", "enum": list(requirements)},
+                        "evidence": {"type": "string"},
+                        "detail": {"type": "string"},
+                    },
+                    "required": ["requirement", "evidence", "detail"],
                 },
-                "required": ["requirement", "evidence", "detail"],
-            },
-        }
-    },
-    "required": ["findings"],
-}
+            }
+        },
+        "required": ["findings"],
+    }
 
 
 def _unfenced(text: str) -> str:
@@ -113,21 +116,59 @@ def main() -> int:
         help="ask for JSON instead of constraining decoding to the schema; "
         "this is how the 0-of-3 format collapse was measured",
     )
+    # Reviewing this library with this library lets the model imitate the
+    # receipt schema it is reading, and the subject changes whenever the
+    # library does.  Both are confounds, so an unrelated subject can be passed
+    # in from outside the repository -- and stays outside it.  Only digests and
+    # byte counts are printed, which is the same discipline the gate applies to
+    # evidence: a result you can check without republishing someone's code.
+    parser.add_argument(
+        "--subject",
+        action="append",
+        metavar="PATH",
+        help="review this file instead of the library's own source; repeatable",
+    )
+    parser.add_argument(
+        "--requirements-file",
+        metavar="PATH",
+        help="one requirement per line; required when --subject is used, "
+        "because the built-in requirements are about this library",
+    )
     options = parser.parse_args()
 
+    if options.subject:
+        if not options.requirements_file:
+            parser.error("--subject needs --requirements-file")
+        requirements = tuple(
+            line.strip()
+            for line in pathlib.Path(options.requirements_file).read_text().splitlines()
+            if line.strip()
+        )
+        paths = [pathlib.Path(name).resolve() for name in options.subject]
+    else:
+        requirements = DEFAULT_REQUIREMENTS
+        paths = [ROOT / name for name in SUBJECTS]
+
     sources = [
-        EvidenceSource(name=name, kind="source", text=(ROOT / name).read_text())
-        for name in SUBJECTS
+        EvidenceSource(name=path.name, kind="source", text=path.read_text())
+        for path in paths
     ]
     total = sum(len(source.text) for source in sources)
     smallest = min(len(source.text) for source in sources)
     print(f"subject: {len(sources)} files, {total} chars, smallest {smallest}")
+    for source in sources:
+        raw = source.text.encode("utf-8")
+        print(
+            f"  {source.name}: {len(raw)} bytes "
+            f"sha256:{hashlib.sha256(raw).hexdigest()[:16]}"
+        )
+    print(f"requirements: {len(requirements)}")
     print(
         "the toy was 88 chars, so a fraction-based ceiling of 0.5 now permits "
         f"an absence pattern of up to {int(smallest * 0.5)} characters"
     )
 
-    prompt = "Requirements:\n" + "\n".join(f"- {line}" for line in REQUIREMENTS)
+    prompt = "Requirements:\n" + "\n".join(f"- {line}" for line in requirements)
     for source in sources:
         prompt += f"\n\nSource of {source.name}:\n{source.text}"
     prompt += "\n\nReport defects. JSON only."
@@ -141,7 +182,7 @@ def main() -> int:
             seed=options.seed,
             num_predict=options.num_predict,
             think={"on": True, "off": False, "default": None}[options.think],
-            schema=None if options.free_form else SCHEMA,
+            schema=None if options.free_form else schema_for(requirements),
         )
     except ReviewerUnavailable as failure:
         print(f"reviewer unavailable: {failure}", file=sys.stderr)
@@ -174,7 +215,7 @@ def main() -> int:
     try:
         receipt = check(
             findings,
-            requirements=REQUIREMENTS,
+            requirements=requirements,
             sources=sources,
             absence_prefix=ABSENCE_PREFIX,
             require_whole_clause=True,

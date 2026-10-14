@@ -27,10 +27,12 @@ I built this expecting to measure how often local models fabricate evidence.
 On a small file that is not what dominates: **most of what looked like
 fabrication was the gate being unable to express the finding.**
 
-Then I ran it on 28 KB of real source and the conclusion reversed — two of
-three models quoted code that was never shown to them. Both results are below,
-in the order I found them, because the gap between them is the only part of
-this worth your time: **the toy measurement I trusted was the one that lied.**
+Then I ran it on real source and the conclusion reversed. Across two unrelated
+subjects — this library, and TypeScript from a codebase I did not write — every
+model produced at least one finding whose evidence does not survive checking.
+All of it is below in the order I found it, because the gap between the two is
+the only part worth your time: **the toy measurement I trusted was the one that
+lied, and it lied in the flattering direction.**
 
 Three local models, one 88-byte file, three requirements, identical question
 (`prompt sha256:43199ee4…`), temperature 0, seed 20261013, reasoning traces
@@ -142,8 +144,8 @@ to a toy are suspect, so I ran the same procedure against two real modules —
 
 Two numbers, because the subject is this library and the library kept changing
 while I measured it: 26,538 characters for the free-form run below, 28,156 for
-the constrained one. A subject that drifts between runs is a poor subject, and
-it is the second reason this experiment needs an unrelated codebase.
+the constrained one. A subject that drifts between runs is a poor subject, which
+is why the third measurement uses an unrelated codebase.
 
 **Asking for JSON in the prompt, no model produced an admissible review, and
 not one of the failures was about evidence:**
@@ -191,14 +193,48 @@ constrained decoding looks exactly like a model that cannot comply, and
 counting it as fabrication would be the same error as the qwen3 empty answer
 further down.
 
-**One of those three failures has a confound I should name.** qwen3's rejected
+**One of those three failures has a confound worth naming.** qwen3's rejected
 keys were `index`, `match_count` and `matches` — fields of the receipt schema
 defined in the very file it was reviewing. It imitated the data structure it was
 reading instead of answering about it. Reviewing the gate with the gate is
-convenient and reproducible, and it contaminates the output format. That result
-is evidence of self-review contamination at least as much as evidence about
-scale, and a clean version of this experiment needs a subject the reviewer has
-no reason to mimic.
+convenient and reproducible, and it contaminates the output format, which is
+what the next section removes.
+
+### Without the confound
+
+Both runs above review this library with this library, which lets a model
+imitate the receipt schema it is reading and lets the subject drift as the
+library changes. So I repeated it on an unrelated subject: two TypeScript
+modules from a private aviation-inspection codebase, 14,025 characters, four
+requirements taken from the code's own stated disclaimers. Different language,
+different domain, nothing for a reviewer to mimic, and a subject that does not
+move.
+
+The subject is not in this repository and will not be. `--subject` takes paths
+from outside it and the script prints only names, byte counts and digests —
+the same discipline the gate applies to evidence, so a result stays checkable
+without republishing someone else's code.
+
+| model | bytes | done_reason | refusal |
+|---|---|---|---|
+| devstral:24b | 7,779 + 6,275 | `stop` | **`absence_pattern_present`** — claimed text is missing; it is in the file |
+| qwen3:8b | same | `stop` | **`evidence_not_in_context`** — 206-byte quote, shown nowhere |
+| qwen2.5-coder:14b | same | `stop` | **`absence_pattern_too_broad`** — invented statement as the missing text |
+
+No format failures, no truncation, three clean answers, and **three different
+evidence refusals.** Read precisely: the gate stops at the first inadmissible
+finding, so this says each model produced *at least one* finding that does not
+hold, not that everything each said was wrong.
+
+devstral's is the interesting one. `absence_pattern_present` is the only
+refusal that *contradicts* rather than declines: the model named text it said
+was absent, the gate searched, and the text was there — one occurrence, located.
+That is a model claim settled against the file, which is the strongest thing
+this library can do and the first time it has done it on code I did not write.
+
+So the reversal holds with the confound removed. On a toy the gate was mostly
+reporting its own inexpressiveness; on real code, at two independent subjects
+and three models, the evidence does not survive checking.
 
 ### The threshold that dissolved
 
