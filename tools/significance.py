@@ -140,10 +140,22 @@ def summarise(path: pathlib.Path) -> dict:
     missed = [r for r in admitted if not r["localised"]]
     near = [r for r in missed if r.get("miss_lines") is not None]
     lines = [r["source_lines"] for r in admitted]
+    # Read from the recorded flags, never from argument order.  The previous
+    # version of this tool took (published, renamed) positionally and checked
+    # the flags afterwards to catch a swap.  With a third arm that check
+    # stops being expressible, and a filename is not evidence of anything --
+    # so the arm is derived from what the run wrote down about itself.
+    if run["renamed"]:
+        arm = "renamed"
+    elif run.get("normalised"):
+        arm = "normalised"
+    else:
+        arm = "published"
     return {
         "path": path.name,
         "model": run["model"],
         "renamed": run["renamed"],
+        "arm": arm,
         "cases": run["cases"],
         "admitted": len(admitted),
         "localised": len(localised),
@@ -157,139 +169,146 @@ def summarise(path: pathlib.Path) -> dict:
     }
 
 
-def report(first: dict, second: dict) -> dict:
-    """Print one model's comparison and return its 2x2 tables for pooling."""
-    for arm in (first, second):
+ORDER = ("published", "normalised", "renamed")
+
+
+def compare(first: dict, second: dict) -> dict:
+    """Print one arm-to-arm comparison and return its 2x2 tables."""
+    left, right = first["arm"], second["arm"]
+    localisation = (
+        first["localised"],
+        first["admitted"] - first["localised"],
+        second["localised"],
+        second["admitted"] - second["localised"],
+    )
+    clustering = (
+        first["adjacent"],
+        first["scattered"],
+        second["adjacent"],
+        second["scattered"],
+    )
+    drop = fisher_two_tailed(*localisation)
+    print(
+        f"  localisation, {left} vs {right}: "
+        f"{first['localised']}/{first['admitted']} vs "
+        f"{second['localised']}/{second['admitted']}  Fisher p = {drop:.4f}"
+        f"{'   significant' if drop < 0.05 else '   NOT SIGNIFICANT'}"
+    )
+    near = fisher_two_tailed(*clustering)
+    print(
+        f"  misses within one line, {left} vs {right}: "
+        f"{first['adjacent']}/{first['adjacent'] + first['scattered']} vs "
+        f"{second['adjacent']}/{second['adjacent'] + second['scattered']}  "
+        f"Fisher p = {near:.5f}"
+        f"{'   significant' if near < 0.05 else '   NOT SIGNIFICANT'}"
+    )
+    return {"pair": (left, right), "localisation": localisation, "clustering": clustering}
+
+
+def report(arms: dict[str, dict]) -> dict:
+    """Print one model's arms and every adjacent comparison between them."""
+    present = [name for name in ORDER if name in arms]
+    for name in present:
+        arm = arms[name]
         rate = arm["localised"] / arm["admitted"]
         print(
-            f"{'renamed ' if arm['renamed'] else 'published'}  "
-            f"admitted {arm['admitted']}/{arm['cases']}  "
+            f"{name:11s} admitted {arm['admitted']}/{arm['cases']}  "
             f"localised {arm['localised']}/{arm['admitted']} = {rate:.3f}  "
             f"chance {arm['chance']:.3f}  "
             f"ratio {rate / arm['chance']:.2f}x"
         )
 
     print()
-    drop = fisher_two_tailed(
-        first["localised"],
-        first["admitted"] - first["localised"],
-        second["localised"],
-        second["admitted"] - second["localised"],
-    )
-    print(
-        f"localisation, published vs renamed: "
-        f"{first['localised']}/{first['admitted']} vs "
-        f"{second['localised']}/{second['admitted']}  Fisher p = {drop:.4f}"
-        f"{'' if drop < 0.05 else '   NOT SIGNIFICANT'}"
-    )
-
-    for arm in (first, second):
+    for name in present:
+        arm = arms[name]
         above = binomial_at_least(arm["localised"], arm["admitted"], arm["chance"])
         below = binomial_at_most(arm["localised"], arm["admitted"], arm["chance"])
-        label = "renamed " if arm["renamed"] else "published"
         print(
-            f"{label} vs chance: P(>={arm['localised']}) = {above:.4f}, "
+            f"  {name} vs chance: P(>={arm['localised']}) = {above:.4f}, "
             f"P(<={arm['localised']}) = {below:.4f}"
             f"{'   above chance' if above < 0.05 else ''}"
             f"{'   indistinguishable from chance' if above >= 0.05 and below >= 0.05 else ''}"
         )
 
     print()
-    clustering = fisher_two_tailed(
-        first["adjacent"],
-        first["scattered"],
-        second["adjacent"],
-        second["scattered"],
-    )
-    print(
-        f"misses within one line of the defect: "
-        f"{first['adjacent']}/{first['adjacent'] + first['scattered']} vs "
-        f"{second['adjacent']}/{second['adjacent'] + second['scattered']}  "
-        f"Fisher p = {clustering:.5f}"
-        f"{'   significant' if clustering < 0.05 else '   NOT SIGNIFICANT'}"
-    )
-    return {
-        "model": first["model"],
-        "localisation": (
-            first["localised"],
-            first["admitted"] - first["localised"],
-            second["localised"],
-            second["admitted"] - second["localised"],
-        ),
-        "clustering": (
-            first["adjacent"],
-            first["scattered"],
-            second["adjacent"],
-            second["scattered"],
-        ),
-    }
+    # Adjacent arms first, because those are the comparisons that isolate one
+    # variable each: published to normalised is the formatting, normalised to
+    # renamed is the names.  published to renamed is printed last and moves
+    # both at once, which is the number that needed decomposing.
+    comparisons = {}
+    for left, right in zip(present, present[1:]):
+        comparisons[(left, right)] = compare(arms[left], arms[right])
+    if len(present) == 3:
+        print()
+        print("  both variables at once, for comparison with the two above:")
+        comparisons[(present[0], present[-1])] = compare(
+            arms[present[0]], arms[present[-1]]
+        )
+    return comparisons
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Test one or more (published, renamed) run pairs."
+        description="Test dataset runs for significance.  Any number of run "
+        "files; the arm and model of each is read from the file itself."
     )
-    parser.add_argument(
-        "runs",
-        nargs="+",
-        type=pathlib.Path,
-        help="published and renamed run JSON, in that order, one pair per model",
-    )
+    parser.add_argument("runs", nargs="+", type=pathlib.Path)
     options = parser.parse_args()
 
-    if len(options.runs) % 2:
-        raise SystemExit(
-            f"{len(options.runs)} files given: runs come in (published, renamed) "
-            "pairs, and an odd count means one arm is missing -- which pair is "
-            "incomplete is not something this tool should guess at"
-        )
+    by_model: dict[str, dict[str, dict]] = {}
+    for path in options.runs:
+        summary = summarise(path)
+        arms = by_model.setdefault(summary["model"], {})
+        if summary["arm"] in arms:
+            raise SystemExit(
+                f"{path.name} and {arms[summary['arm']]['path']} are both the "
+                f"{summary['arm']} arm of {summary['model']}: one of them is "
+                "not the run it was taken for, and averaging two runs of the "
+                "same arm is not what any test here does"
+            )
+        arms[summary["arm"]] = summary
 
     strata = []
-    for published, renamed in zip(options.runs[::2], options.runs[1::2]):
-        first, second = summarise(published), summarise(renamed)
-        if first["renamed"] or not second["renamed"]:
+    for index, (model, arms) in enumerate(by_model.items()):
+        if len(arms) < 2:
             raise SystemExit(
-                f"{published.name} and {renamed.name}: arguments are "
-                "(published-names run, renamed run); the recorded 'renamed' "
-                "flags say otherwise, and comparing the wrong pair would "
-                "produce a confident number about nothing"
+                f"{model} has only the {next(iter(arms))} arm: a single arm "
+                "has nothing to be compared against, and reporting it alone "
+                "would be the bare ratio this tool exists to qualify"
             )
-        if first["model"] != second["model"]:
-            raise SystemExit(
-                f"different models ({first['model']} vs {second['model']}): the "
-                "contamination control only means anything within one model"
-            )
-        if strata:
+        if index:
             print()
             print("-" * 72)
-        print(f"model: {first['model']}")
-        strata.append(report(first, second))
+        print(f"model: {model}")
+        strata.append((model, report(arms)))
 
     if len(strata) < 2:
         return 0
 
-    models = [s["model"] for s in strata]
-    if len(set(models)) != len(models):
-        raise SystemExit(
-            "the same model appears in more than one pair: stratifying by "
-            "model only controls for the model if each stratum is a different "
-            "one, and repeating a stratum would count the same cases twice"
-        )
+    # Only pairs every model actually ran.  Stratifying over a comparison one
+    # model is missing would silently change which models the pooled number
+    # describes, and the label would still say all of them.
+    shared = set.intersection(*(set(c) for _, c in strata))
+    if not shared:
+        return 0
 
     print()
     print("=" * 72)
+    models = [model for model, _ in strata]
     print(f"stratified across {len(strata)} models: {', '.join(models)}")
     print(
         "asymptotic, and anti-conservative at these counts -- read the exact "
         "per-model tests above as the headline"
     )
-    for label, key in (("localisation", "localisation"), ("near misses", "clustering")):
-        statistic, pooled = mantel_haenszel([s[key] for s in strata])
-        print(
-            f"{label}, published vs renamed, stratified by model: "
-            f"CMH chi2 = {statistic:.4f}  p = {pooled:.4f}"
-            f"{'   significant' if pooled < 0.05 else '   NOT SIGNIFICANT'}"
-        )
+    for pair in [p for p in [(a, b) for a in ORDER for b in ORDER] if p in shared]:
+        for label, key in (("localisation", "localisation"), ("near misses", "clustering")):
+            tables = [comparisons[pair][key] for _, comparisons in strata]
+            statistic, pooled = mantel_haenszel(tables)
+            print(
+                f"{label}, {pair[0]} vs {pair[1]}, stratified by model: "
+                f"CMH chi2 = {statistic:.4f}  p = {pooled:.4f}"
+                f"{'   significant' if pooled < 0.05 else '   NOT SIGNIFICANT'}"
+            )
     return 0
 
 

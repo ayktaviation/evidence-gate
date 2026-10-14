@@ -171,6 +171,74 @@ class MantelHaenszel(unittest.TestCase):
         self.assertGreater(approximate, 0.05, "still not significant either way")
 
 
+class ArmIdentification(unittest.TestCase):
+    """The arm comes from the run file, never from argument order.
+
+    The first version of this tool took (published, renamed) positionally and
+    checked the recorded flags afterwards to catch a swap.  A third arm makes
+    that check inexpressible, and a filename was never evidence of anything,
+    so the arm is read from what the run wrote about itself.
+    """
+
+    def run_file(self, **flags):
+        import json
+        import tempfile
+
+        body = {
+            "model": flags.pop("model", "m"),
+            "renamed": flags.pop("renamed", False),
+            "cases": 1,
+            "results": [
+                {
+                    "outcome": "admitted",
+                    "localised": True,
+                    "source_lines": 10,
+                    "miss_lines": None,
+                }
+            ],
+            **flags,
+        }
+        handle = tempfile.NamedTemporaryFile(
+            "w", suffix=".json", delete=False, encoding="utf-8"
+        )
+        json.dump(body, handle)
+        handle.close()
+        return pathlib.Path(handle.name)
+
+    def test_the_three_arms_are_told_apart_by_their_recorded_flags(self):
+        for flags, expected in (
+            ({}, "published"),
+            ({"normalised": False}, "published"),
+            ({"normalised": True}, "normalised"),
+            ({"renamed": True}, "renamed"),
+        ):
+            with self.subTest(flags=flags):
+                self.assertEqual(expected, stats.summarise(self.run_file(**flags))["arm"])
+
+    def test_a_run_predating_the_middle_arm_is_still_the_published_arm(self):
+        """Older run files have no 'normalised' key at all.
+
+        They must keep meaning exactly what they meant when they were
+        written, rather than becoming unreadable or, worse, being relabelled.
+        """
+        path = self.run_file()
+        import json
+
+        self.assertNotIn("normalised", json.loads(path.read_text()))
+        self.assertEqual("published", stats.summarise(path)["arm"])
+
+    def test_renamed_wins_if_a_run_somehow_claims_to_be_both(self):
+        """The CLI refuses to produce such a run, so this is about reading one.
+
+        Reporting the stronger transformation is the conservative choice: a
+        file carrying both flags has had its identifiers stripped whatever
+        else was done to it, and calling it the middle arm would understate
+        what the model was shown.
+        """
+        summary = stats.summarise(self.run_file(renamed=True, normalised=True))
+        self.assertEqual("renamed", summary["arm"])
+
+
 class Binomial(unittest.TestCase):
     def test_a_fair_coin_is_symmetric(self):
         """P(X >= k) must equal P(X <= n - k) when p = 0.5.
