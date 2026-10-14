@@ -251,6 +251,106 @@ the absolute cap works alone, and the fraction survives only to stand between a
 39-character pattern and a 40-character file. Written out because a bound whose
 scope you cannot state is a bound you are trusting, not using.
 
+## Admissible is not correct
+
+Everything above asks whether a finding survives checking. It never asks
+whether the finding is *right*, because nothing in this repository knows where
+the defect actually is. So the third measurement borrows a third party's answer:
+QuixBugs ships 36 single-line Python defects as a broken file and a fixed one,
+and the diff between them is somebody else's statement of where the bug is,
+written before I had an opinion. A model is shown the broken file, the gate
+admits or refuses its finding, and the quoted line is compared against the diff
+(`examples/against_a_dataset.py`). The dataset is not vendored here; the script
+takes a path to your own checkout.
+
+**The two questions come apart immediately.** Across three local models the gate
+admits 94–100% of findings and between 11% and 49% of those admitted findings
+point at the right line. Admissibility was never a proxy for correctness, and
+this is the first measurement in this file that can tell them apart.
+
+Three arms per model, paired on the 35 cases all three arms admitted into the
+comparison (one case dropped; percentages are of admitted findings, and `chance`
+is the mean of `1/lines` over those cases — what quoting a line at random would
+score):
+
+| model | published | reformatted | renamed |
+|---|---|---|---|
+| devstral:24b | 8/33 = 0.242 (2.16x chance) | 11/35 = 0.314 (2.33x) | 4/35 = 0.114 (**0.85x**) |
+| phi4:14b | 17/35 = 0.486 (4.40x) | 17/35 = 0.486 (3.61x) | 5/34 = 0.147 (**1.08x**) |
+| qwen2.5-coder:14b | 14/33 = 0.424 (3.76x) | 14/33 = 0.424 (3.14x) | 4/34 = 0.118 (**0.86x**) |
+
+The published arm is the dataset as distributed — which is on GitHub, which
+means it is plausibly in training data. The renamed arm rewrites every
+identifier through `ast` (`binary_search` becomes `v1`, `lo` becomes `v7`) and
+leaves the control flow untouched, so the defect is still there and still on one
+line. If a model were reading the code, renaming should cost it little.
+
+**All three renamed arms are indistinguishable from quoting a line at random**
+(binomial, one-tailed: p = 0.71, 0.50, 0.70). The honest reading is failure to
+reject, not proof of guessing — but the published arms clear chance decisively
+(p = 0.027, 0.0000, 0.0000), so whatever the published numbers are measuring
+does not survive a rename.
+
+### Splitting the rename into its two halves
+
+Renaming through `ast` does two things at once, and the first version of this
+measurement could not tell them apart: `ast.unparse` also reformats the file.
+Comma spacing, quote style and line breaks all change, which moves lines around
+and changes *which* defects are single-line. A result attributed to identifiers
+might have been reformatting all along. So the middle arm reformats through the
+same code path and keeps every original name — one variable at a time.
+
+- **published → reformatted: no detectable effect.** Fisher p = 0.59, **1.0000,
+  1.0000**; two of three models return *literally identical* counts (17/35 vs
+  17/35, 14/33 vs 14/33). Stratified by model, CMH p = 0.72.
+- **reformatted → renamed: the whole drop.** Fisher p = 0.078, **0.0041,
+  0.0060**; stratified CMH p = 0.0000.
+
+The confound was not just absent, it was *hiding* the effect. devstral scores
+slightly higher reformatted than published, so the two-arm comparison that
+skipped the middle arm diluted its own result to p = 0.21 — the underpowering I
+set out to fix turned out to be partly self-inflicted.
+
+One asymmetry runs the right way for the conclusion. Reformatting raises the
+chance floor (0.135 vs ~0.112) because it packs the files into fewer lines, so
+the renamed arms were scored against an *easier* baseline than the published
+ones and still failed to beat it.
+
+The stratified tests are there to confirm a direction, never to be the
+headline: CMH is asymptotic and anti-conservative at these counts, and the tool
+refuses to pool the arms into one 2×2 at all, because pooling across models
+invites Simpson's paradox (`tools/significance.py`, tested in
+`tests/test_significance.py`).
+
+**The refusals shift too, and are reported as counts only** because single
+digits are not testable. Fabrication — `evidence_not_in_context`, a quote
+appearing nowhere in the file — occurs only in the published and reformatted
+arms (devstral 2, qwen 2 and 2). The renamed arms produce a different failure:
+`evidence_too_short`, a quote too small to localise anything (phi4 1, qwen 1).
+Stripped of familiar names, these models stopped inventing code and started
+hedging.
+
+### What this measurement does not show
+
+- **The published numbers are an upper bound, not a score.** QuixBugs is public,
+  so contamination is the expected condition. That is the point of the renamed
+  arm, not a flaw to apologise for.
+- **Three local 14–24B models, one seed (20261013), 35 paired cases.** No
+  frontier model was measured, and none will be here: that costs money, and the
+  constraint on this work is that it stays free and stays on this machine. A
+  frontier model could behave differently in either direction.
+- **Single-line defects in short self-contained functions** are not what code
+  review is. Median file is a few dozen lines.
+- **The arms are not the same programs.** Reformatting changes which defects are
+  single-line, which is why the comparison is paired on shared cases and why the
+  per-case chance floor is recomputed per arm rather than assumed constant.
+- **"Failure to reject chance" is not "proof of guessing."** At n = 35 the test
+  cannot distinguish a model doing nothing from a model doing a little.
+
+The run files behind this section stay outside this repository. They are
+content-free — hashes, byte counts, line numbers, `done_reason` — but they name
+the 36 holdout cases, and those were spent once and are not reusable.
+
 ## Try it in 60 seconds
 
 ```bash

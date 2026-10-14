@@ -69,6 +69,17 @@ Known limits, stated because they bound what the numbers in the README mean:
 - That scale run reviewed this library with this library, so the model could
   imitate the receipt schema it was reading — and one of the three failures
   looks like exactly that. The experiment needs an unrelated subject.
+- Against a third party's ground truth (QuixBugs, 36 single-line Python
+  defects, three local models, paired on 35 cases), the gate admits 94–100% of
+  findings while 11–49% of admitted findings name the right line. Admissibility
+  is not correctness, and nothing in this library claims to measure the latter.
+- In that run, all three models fall to chance when identifiers are rewritten
+  and are indistinguishable from quoting a line at random. Reformatting through
+  the same code path changes nothing (two models return identical counts), so
+  the drop tracks the names, not the layout. Read as failure to reject chance,
+  not as proof of guessing: n = 35 and one seed cannot support more. The
+  published arm is an upper bound, since the dataset is public and
+  contamination is the expected condition.
 - No frontier model has been measured, so the central finding (that apparent
   fabrication was mostly the gate failing to express the finding) is not
   separated from the limits of 8–24B models.
