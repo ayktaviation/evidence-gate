@@ -294,6 +294,52 @@ def check_the_blind_spot_is_documented(report: list[str]) -> list[str]:
     return problems
 
 
+def check_the_reviewer_is_controlled(report: list[str]) -> list[str]:
+    """The optional reviewer ships in the package, so it is a public surface.
+
+    ``ollama.py`` had no tests through 0.1.0 while being importable from the
+    installed package.  The README now states how many controls it has, and a
+    stated count is only worth the check behind it -- the same argument as the
+    test count and the skip count, both of which were wrong when nothing
+    counted them.
+
+    Two things are required together.  The controls must exist, and the README
+    must keep saying what they cannot do: they run against a replaced
+    ``urlopen``, so they pin this module's behaviour and say nothing about
+    whether the real server's reply shape still matches.  Deleting that caveat
+    while keeping the number would turn an honest limit into an overclaim,
+    which is the drift this file exists to catch.
+    """
+    readme = _readme()
+    path = ROOT / "tests" / "test_ollama.py"
+    if not path.exists():
+        return ["the reviewer module's controls are gone"]
+    suite = unittest.defaultTestLoader.discover(
+        str(ROOT / "tests"), pattern="test_ollama.py"
+    )
+    actual = suite.countTestCases()
+    claimed = {int(found) for found in re.findall(r"(\d+) controls", readme)}
+    report.append(f"reviewer controls: README says {sorted(claimed)}, file has {actual}")
+    problems = []
+    if not claimed:
+        problems.append("README no longer states the reviewer's control count")
+    elif claimed != {actual}:
+        problems.append(
+            f"README claims {sorted(claimed)} reviewer controls, file has {actual}"
+        )
+    if "Not verified against a real server" not in readme:
+        problems.append(
+            "README no longer says the reviewer's controls use a fake server, "
+            "which makes the count read as more than it is"
+        )
+    if "urlopen" not in path.read_text(encoding="utf-8"):
+        problems.append(
+            "the reviewer's controls no longer replace urlopen, so they may be "
+            "reaching a real server and passing for the wrong reason"
+        )
+    return problems
+
+
 def check_the_skipped_control_count(report: list[str]) -> list[str]:
     """The README says how many controls a dataset checkout unlocks.
 
@@ -479,6 +525,7 @@ CHECKS = (
     check_the_python_floor_agrees,
     check_the_typed_marker_is_earned,
     check_the_blind_spot_is_documented,
+    check_the_reviewer_is_controlled,
     check_the_skipped_control_count,
     check_the_measurement_arithmetic,
 )

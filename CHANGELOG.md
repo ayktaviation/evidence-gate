@@ -36,6 +36,28 @@ reported less than it knew. Admissibility is unchanged and a control asserts
 that, since a receipt field that quietly starts refusing things is a
 tightening in disguise.
 
+**Not breaking, additive:** `ollama.py` has controls for the first time, 29 of
+them, and `check_claims.py` fails if the README's count of them drifts.
+
+That module is importable from the installed package, so it was public surface
+with no tests at all while the gate beside it had a control for every refusal.
+The imbalance was not a judgment that it mattered less; it was never counted.
+Its job is to record *what was asked of which model*, and a receipt that is
+wrong about that is worse than no receipt, because the numbers in this README
+are offered as reproducible on someone else's machine.
+
+The controls pin the distinctions that a measurement here has already got
+wrong once: an unreachable server raises rather than returning an empty answer
+(an unmeasured arm must not become a model that produced nothing), a truncated
+answer is recorded from `done_reason` rather than inferred from its size, every
+decoding setting reaches `options_sha256` so two different experiments cannot
+share a receipt, and `receipt()` carries no prompt and no output text.
+
+They run against a replaced `urlopen` and open no socket, which is asserted
+rather than assumed. That also bounds them: a field the real server renames
+would pass the suite and fail on your machine, and the README says so where it
+states the count.
+
 **Not breaking, in the same release:** the committed measurement counts now
 carry the SHA-256 of the run file each arm was computed from
 (`evidence-gate-localisation-aggregate-v2`), and `significance.py --verify`

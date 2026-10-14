@@ -25,7 +25,7 @@ Copy `src/evidence_gate/` into your project, or `pip install -e .`. Python 3.10+
 standard library only. The floor is enforced to agree across the README, the
 packaging metadata and the CI matrix, because it did not: this file claimed
 3.11 while `requires-python` said 3.10, and nothing checked. The suite has been
-run here on 3.9.6, 3.12.13 and 3.14.5 — all 111 tests, no skips beyond the 8
+run here on 3.9.6, 3.12.13 and 3.14.5 — all 140 tests, no skips beyond the 8
 that need a model — so 3.10 and 3.11 sit between two passing versions rather
 than having been executed. That is a bracket, not a measurement, and the CI
 matrix that would close it has not run yet.
@@ -412,7 +412,7 @@ into the case names it was taken over, so this adds no leak.
 
 ```bash
 cd evidence-gate
-python -m unittest discover -s tests          # 111 tests, no dependencies, no install
+python -m unittest discover -s tests          # 140 tests, no dependencies, no install
 python tools/check_claims.py                  # the README's own numbers, verified
 
 # with a local Ollama running:
@@ -538,6 +538,17 @@ without trusting it.
   unannotated, which is **completeness, not correctness**. A wrong annotation
   passes that check and a real type checker would catch it. Closing the rest
   needs a dependency this repository does not have.
+- **Not verified against a real server.** `ollama.py` ships inside the package
+  and so is part of the published surface; until this release it had no tests at
+  all, which was the largest untested area here. It now has 29 controls, and
+  every one of them talks to a fake `urlopen` — they pin that a dead server
+  raises rather than returning an empty answer, that a truncated answer is
+  recorded and not inferred, that changing the schema or the system prompt moves
+  a hash, and that the receipt contains no prompt or output text. What they
+  cannot pin is that the fake's reply shape matches the real API, so a field
+  Ollama renames would pass the suite and fail on your machine. The examples
+  against a live model are the only check on that, and they are not run by the
+  suite.
 - **Not sufficient for absence.** A verified absence says one literal string
   does not occur in the text you supplied. It does not say the requirement is
   unmet: the same behaviour can be written a hundred ways, and the model named
