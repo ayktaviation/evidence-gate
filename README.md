@@ -24,11 +24,13 @@ except GateError as refusal:
 Copy `src/evidence_gate/` into your project, or `pip install -e .`. Python 3.10+,
 standard library only. The floor is enforced to agree across the README, the
 packaging metadata and the CI matrix, because it did not: this file claimed
-3.11 while `requires-python` said 3.10, and nothing checked. The suite has been
-run here on 3.9.6, 3.12.13 and 3.14.5 — all 148 tests, no skips beyond the 8
-that need a model — so 3.10 and 3.11 sit between two passing versions rather
-than having been executed. That is a bracket, not a measurement, and the CI
-matrix that would close it has not run yet.
+3.11 while `requires-python` said 3.10, and nothing checked. The
+[checks run on 2026-10-15 (UTC)](https://github.com/ayktaviation/evidence-gate/actions/runs/38658473542)
+passed the test jobs on Python 3.10, 3.11, 3.12, 3.13 and 3.14 using
+`ubuntu-latest`; its `claims` and `package` jobs also passed. These are the
+versions exercised by that CI run. The 8 dataset harness controls skip without
+a QuixBugs checkout; they require no model. See the commands below to enable
+them with `EVIDENCE_GATE_DATASET`.
 
 **Where to go next**, because most of what follows is a lab notebook rather
 than a manual:
