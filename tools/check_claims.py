@@ -151,12 +151,10 @@ def check_the_python_floor_agrees(report: list[str]) -> list[str]:
     drifts, and the claim about its own supported versions had drifted while
     every test stayed green.
 
-    A floor is also the one claim here that cannot be fully settled on this
-    machine: 3.10 and 3.11 are not installed, and installing them is not
-    something this project does on a user's behalf.  So the check enforces
-    agreement, and the README states separately which interpreters were
-    actually run.  Agreement is verifiable; support is bracketed and said to
-    be bracketed.
+    This check enforces agreement, not execution on each interpreter.  The
+    README separately links the successful 2026-10-15 CI run, which exercised
+    Python 3.10 through 3.14.  Configuration agreement and observed CI results
+    are different claims; neither should stand in for the other.
     """
     pyproject = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
     readme = _readme()
